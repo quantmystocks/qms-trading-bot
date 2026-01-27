@@ -1,1 +1,1 @@
-"""Test suite for leaderboard trading bot."""
+"""Test suite for QMS Trading Bot."""

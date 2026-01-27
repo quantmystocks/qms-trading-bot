@@ -1,4 +1,4 @@
-# Leaderboard Trading Bot
+# QMS Trading Bot
 
 Automated portfolio rebalancing bot that tracks a leaderboard and automatically rebalances your portfolio to match the top 5 stocks every Monday.
 
@@ -24,7 +24,7 @@ Automated portfolio rebalancing bot that tracks a leaderboard and automatically 
 1. **Clone the repository**
    ```bash
    git clone <repository-url>
-   cd leaderboard-trading-bot
+   cd qms-trading-bot
    ```
 
 2. **Copy environment file**
@@ -77,6 +77,7 @@ Set `EMAIL_ENABLED=true` and choose a provider:
 **SMTP (Gmail, Outlook, etc.):**
 - `EMAIL_PROVIDER=smtp`
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`
+- 📖 **Gmail Setup:** See [Gmail App Password Setup Guide](docs/GMAIL_APP_PASSWORD_SETUP.md) for detailed instructions
 
 **SendGrid:**
 - `EMAIL_PROVIDER=sendgrid`
@@ -110,9 +111,36 @@ Set `EMAIL_ENABLED=true` and choose a provider:
 
 ## Deployment
 
+📖 **Not sure which hosting option to choose?** See [Hosting Comparison Guide](docs/HOSTING_COMPARISON.md)
+
 ### Local/Docker
 
 See Quick Start section above.
+
+### GitHub Actions (Free for Scheduled Runs)
+
+Run your bot on a schedule using GitHub Actions - perfect for weekly rebalancing!
+
+**Pros:**
+- ✅ Free for public repos (500 min/month) or private repos (2,000 min/month)
+- ✅ No infrastructure to manage
+- ✅ Built-in scheduling
+- ✅ Secure secret management
+
+**Cons:**
+- ⚠️ Jobs can be delayed during high load
+- ⚠️ Not suitable for time-critical trading
+- ⚠️ Limited to scheduled runs (not always-on)
+
+📖 **Quick Start:** See [GitHub Actions Quick Start Guide](docs/GITHUB_ACTIONS_QUICKSTART.md) (5-minute setup!)
+
+📖 **Full Guide:** See [GitHub Actions Deployment Guide](docs/GITHUB_ACTIONS_DEPLOYMENT.md)
+
+**Quick Steps:**
+1. Add secrets to GitHub repository (Settings → Secrets and variables → Actions)
+2. The workflow file is already created at `.github/workflows/trading-bot.yml`
+3. Test it manually (Actions → Run workflow)
+4. It will run automatically on schedule!
 
 ### AWS (ECS/Fargate with EventBridge)
 
