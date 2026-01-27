@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  trading-bot:
+    build: .
+    container_name: leaderboard-trading-bot
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"  # Only needed if using external scheduler mode
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8080/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
