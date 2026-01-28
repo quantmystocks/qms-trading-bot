@@ -3,6 +3,7 @@
 import logging
 import signal
 import sys
+import os
 from typing import Optional
 from datetime import datetime
 import pytz
@@ -103,9 +104,17 @@ class TradingBot:
         This ensures timezone-aware scheduling works correctly with DST.
         Allows a 5-minute window (9:28-9:33 AM) to account for scheduling delays.
         
+        If FORCE_RUN is set to true, always returns True (allows manual execution).
+        
         Returns:
-            True if it's around 9:30 AM ET on Monday, False otherwise
+            True if it's around 9:30 AM ET on Monday, or if FORCE_RUN=true, False otherwise
         """
+        # Check FORCE_RUN environment variable
+        force_run = os.getenv("FORCE_RUN", "false").lower() == "true"
+        if force_run:
+            logger.info("FORCE_RUN=true - allowing execution regardless of time/day")
+            return True
+        
         # Get current time in Eastern Time
         eastern = pytz.timezone('America/New_York')
         now_et = datetime.now(eastern)
@@ -141,21 +150,79 @@ class TradingBot:
         )
         return False
     
+    def _is_manual_trigger(self) -> bool:
+        """
+        Check if the execution was manually triggered (vs scheduled).
+        
+        Returns:
+            True if manually triggered, False if scheduled or unknown
+        """
+        # Check GitHub Actions environment variables
+        github_event = os.getenv("GITHUB_EVENT_NAME", "")
+        if github_event == "workflow_dispatch":
+            return True
+        elif github_event == "schedule":
+            return False
+        
+        # If not in GitHub Actions, check FORCE_RUN as indicator of manual trigger
+        # (though this is not definitive)
+        return False
+    
+    def _should_execute_trades(self) -> bool:
+        """
+        Check if trades should actually be executed (not dry-run).
+        
+        - Scheduled runs (cron): Always execute
+        - Manual triggers: Only execute if FORCE_RUN=true, otherwise dry-run
+        
+        Returns:
+            True to execute trades, False for dry-run mode
+        """
+        is_manual = self._is_manual_trigger()
+        
+        if not is_manual:
+            # Scheduled run - always execute
+            return True
+        
+        # Manual trigger - only execute if FORCE_RUN=true
+        force_run = os.getenv("FORCE_RUN", "false").lower() == "true"
+        return force_run
+    
     def _execute_rebalancing(self):
         """Execute rebalancing (wrapper for scheduler/webhook)."""
+        # Detect if this is a manual trigger or scheduled run
+        is_manual = self._is_manual_trigger()
+        trigger_type = "Manual trigger" if is_manual else "Scheduled run (cron)"
+        logger.info(f"Execution triggered by: {trigger_type}")
+        
         # Timezone-aware check: only execute at 9:30 AM Eastern Time
         # This handles DST automatically since we check the actual ET time
+        # FORCE_RUN=true allows execution at any time
         if not self._is_market_open_time():
             logger.info("Not executing rebalancing - not at market open time (9:30 AM ET)")
             return None
         
+        # Check if we should execute trades or just simulate (dry-run)
+        dry_run = not self._should_execute_trades()
+        
+        if dry_run:
+            logger.info("=" * 60)
+            logger.info("DRY-RUN MODE: Showing what would be executed (no trades will be placed)")
+            if is_manual:
+                logger.info("Manual trigger detected - Set FORCE_RUN=true to actually execute trades")
+            logger.info("=" * 60)
+        else:
+            if is_manual:
+                logger.info("Executing rebalancing (Manual trigger with FORCE_RUN=true)...")
+            else:
+                logger.info("Executing rebalancing (Scheduled run - always executes)...")
+        
         try:
-            logger.info("Executing rebalancing...")
-            summary = self.rebalancer.rebalance()
-            logger.info(f"Rebalancing completed. Portfolio value: ${summary.portfolio_value:.2f}")
+            summary = self.rebalancer.rebalance(dry_run=dry_run)
+            logger.info(f"Rebalancing {'simulation' if dry_run else 'execution'} completed. Portfolio value: ${summary.portfolio_value:.2f}")
             
-            # Send email notification if enabled
-            if self.email_notifier and self.config.email.recipient:
+            # Send email notification if enabled (only in real execution mode)
+            if not dry_run and self.email_notifier and self.config.email.recipient:
                 try:
                     leaderboard_symbols = self.leaderboard_client.get_top_symbols(top_n=5)
                     self.email_notifier.send_trade_summary(
@@ -169,8 +236,8 @@ class TradingBot:
             return summary
         except Exception as e:
             logger.error(f"Error during rebalancing: {e}")
-            # Send error notification if email is enabled
-            if self.email_notifier and self.config.email.recipient:
+            # Send error notification if email is enabled (only in real execution mode)
+            if not dry_run and self.email_notifier and self.config.email.recipient:
                 try:
                     self.email_notifier.send_error_notification(
                         recipient=self.config.email.recipient,

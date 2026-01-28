@@ -34,12 +34,15 @@ class Rebalancer:
         self.initial_capital = initial_capital
         self.email_notifier = email_notifier
     
-    def rebalance(self) -> TradeSummary:
+    def rebalance(self, dry_run: bool = False) -> TradeSummary:
         """
         Execute portfolio rebalancing based on week-over-week leaderboard comparison.
         
+        Args:
+            dry_run: If True, print actions but don't execute trades. If False, execute trades normally.
+        
         Returns:
-            TradeSummary with details of executed trades
+            TradeSummary with details of executed trades (or simulated trades in dry-run mode)
         """
         logger.info("Starting portfolio rebalancing")
         
@@ -86,7 +89,7 @@ class Rebalancer:
         # Case 1: No stocks from previous week's LB exist and 10k cash balance exists
         if not positions_from_prev_week and cash_balance >= 10000.0:
             logger.info("No stocks from previous week's LB exist and cash balance >= $10k. Entering trades for top 5 stocks using initial_capital.")
-            return self._initial_allocation(current_week_symbols_upper, self.initial_capital)
+            return self._initial_allocation(current_week_symbols_upper, self.initial_capital, dry_run=dry_run)
         
         # Case 2: Compare top 5 stocks between LB-1 and LB
         # Sell stocks that were in last week's top 5 but aren't in this week's top 5
@@ -95,7 +98,8 @@ class Rebalancer:
         return self._execute_week_over_week_rebalancing(
             current_allocations,
             current_week_symbols_upper,
-            previous_week_symbols_upper
+            previous_week_symbols_upper,
+            dry_run=dry_run
         )
     
     def _allocations_match(self, allocations: List[Allocation], target_symbols: List[str]) -> bool:
@@ -106,36 +110,48 @@ class Rebalancer:
         # Check if we have exactly the top 5 symbols
         return current_symbols == target_set and len(current_symbols) == 5
     
-    def _initial_allocation(self, symbols: List[str], amount: Optional[float] = None) -> TradeSummary:
+    def _initial_allocation(self, symbols: List[str], amount: Optional[float] = None, dry_run: bool = False) -> TradeSummary:
         """
         Perform initial allocation when portfolio is empty.
         
         Args:
             symbols: List of symbols to buy
             amount: Amount to allocate. If None, uses initial_capital.
+            dry_run: If True, print actions but don't execute trades.
         """
         buys = []
         allocation_amount = amount if amount is not None else self.initial_capital
         allocation_per_stock = allocation_amount / len(symbols)
         
-        logger.info(f"Dividing ${allocation_amount} into {len(symbols)} stocks: ${allocation_per_stock} each")
+        if dry_run:
+            logger.info(f"[DRY-RUN] Would divide ${allocation_amount} into {len(symbols)} stocks: ${allocation_per_stock} each")
+        else:
+            logger.info(f"Dividing ${allocation_amount} into {len(symbols)} stocks: ${allocation_per_stock} each")
         
         for symbol in symbols:
-            try:
-                success = self.broker.buy(symbol, allocation_per_stock)
-                if success:
-                    buys.append({
-                        "symbol": symbol,
-                        "quantity": 0,  # Will be updated after getting positions
-                        "cost": allocation_per_stock,
-                    })
-                    logger.info(f"Bought ${allocation_per_stock} of {symbol}")
-                else:
-                    logger.warning(f"Failed to buy {symbol}")
-            except Exception as e:
-                logger.error(f"Error buying {symbol}: {e}")
+            if dry_run:
+                buys.append({
+                    "symbol": symbol,
+                    "quantity": 0,  # Will be estimated
+                    "cost": allocation_per_stock,
+                })
+                logger.info(f"[DRY-RUN] Would buy ${allocation_per_stock} of {symbol}")
+            else:
+                try:
+                    success = self.broker.buy(symbol, allocation_per_stock)
+                    if success:
+                        buys.append({
+                            "symbol": symbol,
+                            "quantity": 0,  # Will be updated after getting positions
+                            "cost": allocation_per_stock,
+                        })
+                        logger.info(f"Bought ${allocation_per_stock} of {symbol}")
+                    else:
+                        logger.warning(f"Failed to buy {symbol}")
+                except Exception as e:
+                    logger.error(f"Error buying {symbol}: {e}")
         
-        # Get updated allocations
+        # Get updated allocations (or current if dry-run)
         try:
             final_allocations = self.broker.get_current_allocation()
             # Update quantities in buys
@@ -155,12 +171,19 @@ class Rebalancer:
         current_allocations: List[Allocation],
         current_week_symbols: List[str],
         previous_week_symbols: List[str],
+        dry_run: bool = False,
     ) -> TradeSummary:
         """
         Execute rebalancing based on week-over-week leaderboard comparison.
         
         Sell stocks that were in last week's top 5 but aren't in this week's top 5.
         Buy stocks that entered this week's top 5.
+        
+        Args:
+            current_allocations: Current portfolio positions
+            current_week_symbols: Top 5 symbols from current week's leaderboard
+            previous_week_symbols: Top 5 symbols from previous week's leaderboard
+            dry_run: If True, print actions but don't execute trades.
         """
         current_symbols = {alloc.symbol.upper() for alloc in current_allocations}
         current_week_set = {s.upper() for s in current_week_symbols}
@@ -181,24 +204,36 @@ class Rebalancer:
         for symbol in symbols_to_sell:
             allocation = next((a for a in current_allocations if a.symbol.upper() == symbol), None)
             if allocation:
-                try:
-                    success = self.broker.sell(symbol, allocation.quantity)
-                    if success:
-                        sells.append({
-                            "symbol": symbol,
-                            "quantity": allocation.quantity,
-                            "proceeds": allocation.market_value,
-                        })
-                        total_proceeds += allocation.market_value
-                        logger.info(f"Sold {allocation.quantity} shares of {symbol} for ${allocation.market_value} (dropped out of top 5)")
-                    else:
-                        logger.warning(f"Failed to sell {symbol}")
-                except Exception as e:
-                    logger.error(f"Error selling {symbol}: {e}")
+                if dry_run:
+                    sells.append({
+                        "symbol": symbol,
+                        "quantity": allocation.quantity,
+                        "proceeds": allocation.market_value,
+                    })
+                    total_proceeds += allocation.market_value
+                    logger.info(f"[DRY-RUN] Would sell {allocation.quantity} shares of {symbol} for ${allocation.market_value} (dropped out of top 5)")
+                else:
+                    try:
+                        success = self.broker.sell(symbol, allocation.quantity)
+                        if success:
+                            sells.append({
+                                "symbol": symbol,
+                                "quantity": allocation.quantity,
+                                "proceeds": allocation.market_value,
+                            })
+                            total_proceeds += allocation.market_value
+                            logger.info(f"Sold {allocation.quantity} shares of {symbol} for ${allocation.market_value} (dropped out of top 5)")
+                        else:
+                            logger.warning(f"Failed to sell {symbol}")
+                    except Exception as e:
+                        logger.error(f"Error selling {symbol}: {e}")
         
         # Get available cash (from sales + existing cash)
         try:
             available_cash = self.broker.get_account_cash()
+            if dry_run:
+                # In dry-run, estimate available cash as current cash + proceeds from sales
+                available_cash = available_cash + total_proceeds
             logger.info(f"Available cash: ${available_cash}")
         except Exception as e:
             logger.error(f"Error getting account cash: {e}")
@@ -207,38 +242,53 @@ class Rebalancer:
         # Buy new positions that entered top 5 (equal weight)
         if symbols_to_buy:
             allocation_per_stock = available_cash / len(symbols_to_buy)
-            logger.info(f"Buying {len(symbols_to_buy)} new stocks with ${allocation_per_stock} each")
+            if dry_run:
+                logger.info(f"[DRY-RUN] Would buy {len(symbols_to_buy)} new stocks with ${allocation_per_stock} each")
+            else:
+                logger.info(f"Buying {len(symbols_to_buy)} new stocks with ${allocation_per_stock} each")
             
             for symbol in symbols_to_buy:
-                try:
-                    success = self.broker.buy(symbol, allocation_per_stock)
-                    if success:
-                        buys.append({
-                            "symbol": symbol,
-                            "quantity": 0,  # Will be updated
-                            "cost": allocation_per_stock,
-                        })
-                        logger.info(f"Bought ${allocation_per_stock} of {symbol} (entered top 5)")
-                    else:
-                        logger.warning(f"Failed to buy {symbol}")
-                except Exception as e:
-                    logger.error(f"Error buying {symbol}: {e}")
+                if dry_run:
+                    buys.append({
+                        "symbol": symbol,
+                        "quantity": 0,  # Will be estimated
+                        "cost": allocation_per_stock,
+                    })
+                    logger.info(f"[DRY-RUN] Would buy ${allocation_per_stock} of {symbol} (entered top 5)")
+                else:
+                    try:
+                        success = self.broker.buy(symbol, allocation_per_stock)
+                        if success:
+                            buys.append({
+                                "symbol": symbol,
+                                "quantity": 0,  # Will be updated
+                                "cost": allocation_per_stock,
+                            })
+                            logger.info(f"Bought ${allocation_per_stock} of {symbol} (entered top 5)")
+                        else:
+                            logger.warning(f"Failed to buy {symbol}")
+                    except Exception as e:
+                        logger.error(f"Error buying {symbol}: {e}")
         
-        # Get final allocations
+        # Get final allocations (use current if dry-run, since no trades were executed)
         try:
             final_allocations = self.broker.get_current_allocation()
-            # Update quantities in buys
-            for buy in buys:
-                for alloc in final_allocations:
-                    if alloc.symbol.upper() == buy["symbol"].upper():
-                        buy["quantity"] = alloc.quantity
-                        break
+            # Update quantities in buys (only if not dry-run, since in dry-run we don't have actual quantities)
+            if not dry_run:
+                for buy in buys:
+                    for alloc in final_allocations:
+                        if alloc.symbol.upper() == buy["symbol"].upper():
+                            buy["quantity"] = alloc.quantity
+                            break
         except Exception as e:
             logger.error(f"Error getting final allocations: {e}")
             final_allocations = []
         
         if not sells and not buys:
-            logger.info("No rebalancing needed - all positions match leaderboard changes")
+            if dry_run:
+                logger.info("[DRY-RUN] No rebalancing needed - all positions match leaderboard changes")
+            else:
+                logger.info("No rebalancing needed - all positions match leaderboard changes")
         
         return self._create_summary(buys, sells, final_allocations)
     
