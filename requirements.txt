@@ -2,6 +2,7 @@
 alpaca-py>=0.28.0
 robin-stocks>=3.4.0
 webull-python-sdk-core>=0.1.18
+webull-python-sdk-mdata>=0.1.14
 webull-python-sdk-trade>=0.1.14
 APScheduler>=3.10.0
 flask>=3.0.0
