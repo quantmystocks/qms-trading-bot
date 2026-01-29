@@ -14,57 +14,106 @@ GitHub Actions can trigger your bot on a schedule (e.g., weekly) using the **ext
 
 ## Setup Instructions
 
-### Step 1: Configure Secrets
+### Step 1: Configure Secrets and Variables
 
 1. Go to your GitHub repository
 2. Navigate to **Settings** → **Secrets and variables** → **Actions**
-3. Click **"New repository secret"**
-4. Add the following secrets (one at a time):
+3. Add secrets (🔒) and variables (📝) as indicated below
 
-**Required Secrets:**
-- `LEADERBOARD_API_URL` - Your leaderboard API endpoint
-- `LEADERBOARD_API_TOKEN` - Your leaderboard API token
+📖 **See [GitHub Secrets vs Variables Guide](GITHUB_SECRETS_VS_VARIABLES.md) for when to use secrets vs variables**
+
+#### Complete Environment Variables Reference
+
+**Required Variables:**
+
+**Leaderboard API (🔒 Secrets):**
+- `LEADERBOARD_API_URL` - Your leaderboard API endpoint (can be variable if not sensitive)
+- `LEADERBOARD_API_TOKEN` - Your leaderboard API token (must be secret)
+
+**Broker Type (📝 Variable):**
 - `BROKER_TYPE` - Either `alpaca`, `robinhood`, or `webull`
 
-**Broker Secrets (Alpaca):**
-- `ALPACA_API_KEY`
-- `ALPACA_API_SECRET`
-- `ALPACA_BASE_URL` - e.g., `https://paper-api.alpaca.markets`
+**Broker-Specific Variables:**
 
-**Broker Secrets (Robinhood):**
-- `ROBINHOOD_USERNAME`
-- `ROBINHOOD_PASSWORD`
-- `ROBINHOOD_MFA_CODE` (if using 2FA)
+**Alpaca (🔒 Secrets - required if BROKER_TYPE=alpaca):**
+- `ALPACA_API_KEY` - Your Alpaca API key
+- `ALPACA_API_SECRET` - Your Alpaca API secret
+- `ALPACA_BASE_URL` - `https://paper-api.alpaca.markets` (paper) or `https://api.alpaca.markets` (live) - can be variable
 
-**Broker Secrets (Webull):**
-- Uses official Webull OpenAPI SDK - requires App Key/Secret from developer.webull.com
-- `WEBULL_APP_KEY`: Your Webull App Key
-- `WEBULL_APP_SECRET`: Your Webull App Secret
-- `WEBULL_ACCOUNT_ID` (optional)
-- `WEBULL_REGION` (optional, default: US)
+**Robinhood (🔒 Secrets - required if BROKER_TYPE=robinhood):**
+- `ROBINHOOD_USERNAME` - Your Robinhood username/email
+- `ROBINHOOD_PASSWORD` - Your Robinhood password
+- `ROBINHOOD_MFA_CODE` - Optional: MFA code if 2FA is enabled
 
-**Email Secrets (if enabled):**
+**Webull (🔒 Secrets - required if BROKER_TYPE=webull):**
+- `WEBULL_APP_KEY` - Your Webull App Key (get from [developer.webull.com](https://developer.webull.com))
+- `WEBULL_APP_SECRET` - Your Webull App Secret
+- `WEBULL_ACCOUNT_ID` - Optional: Account ID (will use first account if not provided) - can be variable
+- `WEBULL_REGION` - Optional: `US`, `HK`, or `JP` (default: `US`) - can be variable
+
+**Trading Configuration (📝 Variables):**
+- `INITIAL_CAPITAL` - Initial capital amount (e.g., `10000.0`)
+
+**Scheduler Configuration (📝 Variables):**
+- `SCHEDULER_MODE` - Set to `internal` (default) for GitHub Actions
+- `CRON_SCHEDULE` - Cron expression (default: `0 0 * * 1` for Mondays) - handled by workflow file
+- `WEBHOOK_PORT` - Not used for GitHub Actions (can be omitted)
+- `WEBHOOK_SECRET` - Not used for GitHub Actions (can be omitted)
+
+**Email Configuration:**
+
+**Basic Email Settings (📝 Variables):**
 - `EMAIL_ENABLED` - Set to `true` or `false`
-- `EMAIL_RECIPIENT` - Where to send notifications
+- `EMAIL_RECIPIENT` - Recipient email address (🔒 Secret for privacy)
 - `EMAIL_PROVIDER` - `smtp`, `sendgrid`, or `ses`
-- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL` (for SMTP)
-- Or SendGrid/SES credentials as needed
 
-**Trading Configuration:**
-- `INITIAL_CAPITAL` - e.g., `10000.0`
-- `SCHEDULER_MODE` - Set to `external` (required for GitHub Actions)
+**SMTP Configuration (🔒 Secrets - required if EMAIL_PROVIDER=smtp):**
+- `SMTP_HOST` - e.g., `smtp.gmail.com` (can be variable)
+- `SMTP_PORT` - e.g., `587` (can be variable)
+- `SMTP_USERNAME` - Your email username
+- `SMTP_PASSWORD` - Your email app password
+- `SMTP_FROM_EMAIL` - From email address
 
-**Persistence Secrets (optional - for Firebase Firestore):**
-- `FIREBASE_PROJECT_ID` - Your Firebase project ID
-- `FIREBASE_CREDENTIALS_JSON` - **Entire content of Firebase service account JSON file** (store as secret)
+**SendGrid Configuration (🔒 Secrets - required if EMAIL_PROVIDER=sendgrid):**
+- `SENDGRID_API_KEY` - Your SendGrid API key
+- `SENDGRID_FROM_EMAIL` - Your verified SendGrid email (can be variable)
+
+**AWS SES Configuration (🔒 Secrets - required if EMAIL_PROVIDER=ses):**
+- `AWS_REGION` - e.g., `us-east-1` (can be variable)
+- `AWS_ACCESS_KEY_ID` - Your AWS access key
+- `AWS_SECRET_ACCESS_KEY` - Your AWS secret key
+- `SES_FROM_EMAIL` - Your verified SES email (can be variable)
+
+**Persistence Configuration (Optional - 🔒 Secrets):**
+- `PERSISTENCE_ENABLED` - Set to `true` (optional - auto-enables if credentials are set) - can be variable
+- `FIREBASE_PROJECT_ID` - Your Firebase project ID (can be variable)
+- `FIREBASE_CREDENTIALS_JSON` - **Entire content of Firebase service account JSON file**
   - Download JSON from Firebase Console → Project Settings → Service Accounts
   - Copy the entire file content (including all braces, quotes, etc.)
-  - Paste as a single-line secret (GitHub will handle multi-line secrets)
-- `PERSISTENCE_ENABLED` - Set to `true` (optional - auto-enables if credentials are set)
+  - Paste as a secret (GitHub handles multi-line secrets)
 
-**⚠️ Important:** Never commit the Firebase JSON file to git. Use `FIREBASE_CREDENTIALS_JSON` secret for GitHub Actions.
+**Multiple Portfolio Configuration (Optional):**
 
-### Step 2: Create GitHub Actions Workflow
+**Method 1: Environment Variables (📝 Variables):**
+- `TRADE_INDICES` - Comma-separated list (e.g., `SP400,SP500,SP600`)
+- `INITIAL_CAPITAL_SP400` - Capital for SP400 portfolio
+- `INITIAL_CAPITAL_SP500` - Capital for SP500 portfolio
+- `INITIAL_CAPITAL_SP600` - Capital for SP600 portfolio
+- `INITIAL_CAPITAL_NDX` - Capital for NDX portfolio
+
+**Method 2: JSON Configuration (📝 Variable):**
+- `PORTFOLIO_CONFIG` - JSON string: `[{"portfolio_name":"SP400","index_id":"13","initial_capital":50000,"enabled":true}]`
+
+**Security Configuration (📝 Variable):**
+- `MASK_FINANCIAL_AMOUNTS` - Set to `true` or `false` (default: `true`)
+
+**⚠️ Important:** 
+- Never commit sensitive values to git
+- Use secrets (🔒) for API keys, passwords, tokens, and sensitive data
+- Use variables (📝) for non-sensitive configuration values
+- See [GitHub Secrets vs Variables Guide](GITHUB_SECRETS_VS_VARIABLES.md) for details
+
+### Step 2: Create GitHub Actions Workflow (already present)
 
 Create the file `.github/workflows/trading-bot.yml`:
 

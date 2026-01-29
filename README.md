@@ -5,6 +5,7 @@ Automated portfolio rebalancing bot that tracks a leaderboard and automatically 
 ## Features
 
 - **Automated Rebalancing**: Automatically rebalances portfolio to match leaderboard top 5 stocks
+- **Multiple Portfolio Support**: Trade multiple indices simultaneously (SP400, SP500, SP600, NDX) with independent capital and tracking
 - **Multiple Broker Support**: Works with Alpaca, Robinhood, and Webull
 - **Flexible Scheduling**: Internal scheduler or external webhook triggers
 - **Email Notifications**: Get notified when trades complete (SMTP, SendGrid, or AWS SES)
@@ -14,40 +15,43 @@ Automated portfolio rebalancing bot that tracks a leaderboard and automatically 
 
 ## Quick Start
 
+Choose your deployment method:
+
+- 🖥️ **[Local Setup Guide](docs/LOCAL_SETUP.md)** - Run locally or with Docker
+- ☁️ **[GitHub Actions Setup](docs/GITHUB_ACTIONS_DEPLOYMENT.md)** - Free scheduled runs (recommended for most users)
+- 🌐 **[Web Hosting Setup](docs/WEB_HOSTING_SETUP.md)** - Deploy to AWS, GCP, or Azure
+
 ### Prerequisites
 
 - Python 3.11+ or Docker
 - Broker account (Alpaca, Robinhood, or Webull)
 - Leaderboard API access
 
-### Installation
+### Quick Local Test
 
-1. **Clone the repository**
+1. **Clone and setup:**
    ```bash
    git clone <repository-url>
    cd qms-trading-bot
-   ```
-
-2. **Copy environment file**
-   ```bash
    cp .env.example .env
    ```
 
-3. **Configure your settings**
-   Edit `.env` with your API keys and credentials (see Configuration section)
+2. **Configure `.env`** with your API keys and credentials
 
-4. **Run with Docker (Recommended)**
+3. **Run with Docker:**
    ```bash
    docker-compose up
    ```
 
-5. **Or run locally**
+   **Or run locally:**
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    pip install -r requirements.txt
    python -m src.main
    ```
+
+📖 **For detailed setup instructions, see the [Local Setup Guide](docs/LOCAL_SETUP.md)**
 
 ## Configuration
 
@@ -78,6 +82,11 @@ All configuration is done via environment variables. See `.env.example` for all 
 - `WEBULL_ACCOUNT_ID`: Optional account ID (will use first account if not provided)
 - `WEBULL_REGION`: Region code (US, HK, or JP) - default: US
 
+📖 **For hosting-specific broker configuration, see:**
+- [Local Setup Guide](docs/LOCAL_SETUP.md#broker-configuration)
+- [GitHub Actions Setup](docs/GITHUB_ACTIONS_DEPLOYMENT.md#step-1-configure-secrets)
+- [Web Hosting Setup](docs/WEB_HOSTING_SETUP.md#configuration)
+
 ### Email Configuration
 
 Set `EMAIL_ENABLED=true` and choose a provider:
@@ -95,16 +104,26 @@ Set `EMAIL_ENABLED=true` and choose a provider:
 - `EMAIL_PROVIDER=ses`
 - `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `SES_FROM_EMAIL`
 
+📖 **For hosting-specific email configuration, see:**
+- [Local Setup Guide](docs/LOCAL_SETUP.md#email-configuration)
+- [GitHub Actions Setup](docs/GITHUB_ACTIONS_DEPLOYMENT.md#email-configuration)
+- [Web Hosting Setup](docs/WEB_HOSTING_SETUP.md#email-providers)
+
 ### Scheduler Configuration
 
-**Internal Scheduler (Default):**
+**Internal Scheduler (Default for local/GitHub Actions):**
 - `SCHEDULER_MODE=internal`
 - `CRON_SCHEDULE=0 0 * * 1` (Mondays at midnight)
 
-**External Scheduler (for cloud deployments):**
+**External Scheduler (Required for cloud deployments):**
 - `SCHEDULER_MODE=external`
 - `WEBHOOK_PORT=8080`
-- `WEBHOOK_SECRET=optional_secret_token`
+- `WEBHOOK_SECRET=optional_secret_token` (strongly recommended)
+
+📖 **For hosting-specific scheduler configuration, see:**
+- [Local Setup Guide](docs/LOCAL_SETUP.md#scheduler-configuration)
+- [GitHub Actions Setup](docs/GITHUB_ACTIONS_DEPLOYMENT.md) (uses internal scheduler)
+- [Web Hosting Setup](docs/WEB_HOSTING_SETUP.md) (uses external scheduler with EventBridge/Cloud Scheduler/Logic Apps)
 
 ### Persistence Configuration (Optional)
 
@@ -129,47 +148,15 @@ Enable Firebase Firestore to track bot trades and detect external sales:
    - Click **"Generate New Private Key"**
    - Download the JSON file (e.g., `firebase-service-account.json`)
 
-#### Step 2: Verify Setup (Only for local Development)
-
-Run the verification script to verify Firebase connectivity:
-
-```bash
-python scripts/verify-firebase.py
-```
-
-This script will:
-- Verify Firebase credentials are valid
-- Test Firestore connection
-- Verify collections can be created
-- Test read/write operations
-
-#### Step 3: Configure Environment Variables
-
-**For Local Development:**
-
-Add to your `.env` file:
-```bash
-# Persistence Configuration
-FIREBASE_PROJECT_ID=your-firebase-project-id
-FIREBASE_CREDENTIALS_PATH=/path/to/firebase-service-account.json
-PERSISTENCE_ENABLED=true  # Optional - auto-enables if credentials are set
-```
-
-**For GitHub Actions / CI/CD:**
-
-1. Go to your GitHub repository → **Settings** → **Secrets and variables** → **Actions**
-2. Add the following secrets:
-   - `FIREBASE_PROJECT_ID` = Your Firebase project ID (e.g., `qmsf-e541d`)
-   - `FIREBASE_CREDENTIALS_JSON` = **Entire content** of the Firebase service account JSON file
-     - Open the downloaded JSON file
-     - Copy **all** content (including all braces, quotes, newlines)
-     - Paste into the secret value (GitHub handles multi-line secrets)
-   - `PERSISTENCE_ENABLED` = `true` (optional - auto-enables if credentials are set)
+📖 **For hosting-specific persistence configuration, see:**
+- [Local Setup Guide](docs/LOCAL_SETUP.md#persistence-configuration-optional) - Includes verification script
+- [GitHub Actions Setup](docs/GITHUB_ACTIONS_DEPLOYMENT.md#persistence-configuration) - Uses secrets
+- [Web Hosting Setup](docs/WEB_HOSTING_SETUP.md#persistence-firebase) - Uses secret management services
 
 **⚠️ Security Note:** 
 - **Never commit** the Firebase JSON file to git
 - Use `FIREBASE_CREDENTIALS_PATH` for local development (file path)
-- Use `FIREBASE_CREDENTIALS_JSON` for CI/CD (JSON string from secret)
+- Use `FIREBASE_CREDENTIALS_JSON` for CI/CD and cloud hosting (JSON string)
 - Add `firebase-service-account.json` to `.gitignore` if storing locally
 
 **Features:**
@@ -193,7 +180,61 @@ PERSISTENCE_ENABLED=true  # Optional - auto-enables if credentials are set
 - Multiple stocks moving in/out
 - Manually purchased stocks entering top 5
 
+### Multiple Portfolio Trading
+
+The bot supports trading multiple portfolios simultaneously, each tracking different leaderboard indices independently.
+
+**Available Indices:**
+- **SP400** (indexId: 13) - S&P 400 MidCap
+- **SP500** (indexId: 9) - S&P 500 LargeCap
+- **SP600** (indexId: 12) - S&P 600 SmallCap
+- **NDX** (indexId: 8) - NASDAQ-100
+
+**⚠️ Important:** Persistence **must** be enabled when using multiple portfolios. The bot will raise an error if multiple portfolios are configured without persistence.
+
+#### Features
+
+- ✅ **Independent Trading**: Each portfolio trades the top 5 stocks from its respective index
+- ✅ **Separate Capital**: Each portfolio maintains its own initial capital and tracks performance independently
+- ✅ **Overlapping Stocks**: Handles cases where the same stock appears in multiple portfolios using virtual portfolio tracking
+- ✅ **Proportional Selling**: When selling overlapping stocks, calculates sellable quantity based on portfolio's fraction of total ownership
+- ✅ **Performance Tracking**: Individual and aggregate performance metrics for each portfolio
+- ✅ **Email Reports**: Multi-portfolio email summaries with per-portfolio and overall performance
+
+#### Configuration Methods
+
+**Method 1: Environment Variables (Recommended)**
+```bash
+TRADE_INDICES=SP400,SP500,SP600
+INITIAL_CAPITAL_SP400=50000
+INITIAL_CAPITAL_SP500=100000
+INITIAL_CAPITAL_SP600=30000
+```
+
+**Method 2: JSON Configuration**
+```bash
+PORTFOLIO_CONFIG='[{"portfolio_name":"SP400","index_id":"13","initial_capital":50000,"enabled":true}]'
+```
+
+**Method 3: Configuration File**
+Create `portfolio_config.json` with portfolio definitions.
+
+📖 **For hosting-specific multiple portfolio configuration, see:**
+- [Local Setup Guide](docs/LOCAL_SETUP.md#multiple-portfolio-trading)
+- [GitHub Actions Setup](docs/GITHUB_ACTIONS_DEPLOYMENT.md#multiple-portfolio-trading)
+- [Web Hosting Setup](docs/WEB_HOSTING_SETUP.md#multiple-portfolios)
+
+#### How Overlapping Stocks Work
+
+When the same stock appears in multiple portfolios:
+- Each portfolio tracks its own purchases separately
+- When selling, the bot calculates the portfolio's fraction of total tracked ownership
+- Sellable quantity is proportional to the portfolio's ownership fraction
+- External sales are proportionally applied across all portfolios owning the stock
+
 ## How It Works
+
+### Single Portfolio Mode
 
 1. **Scheduler triggers** every Monday (or as configured)
 2. **Fetches leaderboard** top 5 stocks from your API
@@ -206,62 +247,41 @@ PERSISTENCE_ENABLED=true  # Optional - auto-enables if credentials are set
 6. **Records trades** in Firestore (if persistence enabled)
 7. **Sends email notification** with trade summary (if enabled)
 
+### Multiple Portfolio Mode
+
+When multiple portfolios are configured:
+
+1. **Scheduler triggers** every Monday (or as configured)
+2. **For each portfolio**:
+   - Fetches leaderboard top 5 stocks for that portfolio's index (SP400, SP500, etc.)
+   - Checks current portfolio allocation
+   - Detects external sales (if persistence enabled) and adds proceeds to available capital
+   - Rebalances independently using the portfolio's own capital
+   - Records trades in Firestore with portfolio name
+3. **Handles overlapping stocks**:
+   - Calculates proportional ownership when the same stock appears in multiple portfolios
+   - Applies proportional selling logic for shared positions
+4. **Calculates performance metrics** for each portfolio individually and overall aggregate
+5. **Sends email notification** with multi-portfolio summary including per-portfolio and aggregate performance
+
 ## Deployment
+
+Choose your deployment method:
+
+- 🖥️ **[Local Setup Guide](docs/LOCAL_SETUP.md)** - Run locally or with Docker
+- ☁️ **[GitHub Actions Setup](docs/GITHUB_ACTIONS_DEPLOYMENT.md)** - Free scheduled runs (recommended for most users)
+  - 📖 **Quick Start:** [GitHub Actions Quick Start Guide](docs/GITHUB_ACTIONS_QUICKSTART.md) (5-minute setup!)
+- 🌐 **[Web Hosting Setup](docs/WEB_HOSTING_SETUP.md)** - Deploy to AWS, GCP, or Azure
 
 📖 **Not sure which hosting option to choose?** See [Hosting Comparison Guide](docs/HOSTING_COMPARISON.md)
 
-### Local/Docker
+### Quick Comparison
 
-See Quick Start section above.
-
-### GitHub Actions (Free for Scheduled Runs)
-
-Run your bot on a schedule using GitHub Actions - perfect for weekly rebalancing!
-
-**Pros:**
-- ✅ Free for public repos (500 min/month) or private repos (2,000 min/month)
-- ✅ No infrastructure to manage
-- ✅ Built-in scheduling
-- ✅ Secure secret management
-
-**Cons:**
-- ⚠️ Jobs can be delayed during high load
-- ⚠️ Not suitable for time-critical trading
-- ⚠️ Limited to scheduled runs (not always-on)
-
-📖 **Quick Start:** See [GitHub Actions Quick Start Guide](docs/GITHUB_ACTIONS_QUICKSTART.md) (5-minute setup!)
-
-📖 **Full Guide:** See [GitHub Actions Deployment Guide](docs/GITHUB_ACTIONS_DEPLOYMENT.md)
-
-**Quick Steps:**
-1. Add secrets to GitHub repository (Settings → Secrets and variables → Actions)
-2. The workflow file is already created at `.github/workflows/trading-bot.yml`
-3. Test it manually (Actions → Run workflow)
-4. It will run automatically on schedule!
-
-### AWS (ECS/Fargate with EventBridge)
-
-1. Build and push Docker image to ECR
-2. Deploy to ECS/Fargate
-3. Set `SCHEDULER_MODE=external`
-4. Create EventBridge rule: `cron(0 0 ? * MON *)`
-5. Configure EventBridge to POST to your container endpoint
-
-### GCP (Cloud Run with Cloud Scheduler)
-
-1. Build and push Docker image to GCR
-2. Deploy to Cloud Run
-3. Set `SCHEDULER_MODE=external`
-4. Create Cloud Scheduler job: `0 0 * * 1`
-5. Configure job to POST to Cloud Run service URL
-
-### Azure (Container Instances with Logic Apps)
-
-1. Build and push Docker image to ACR
-2. Deploy to Container Instances
-3. Set `SCHEDULER_MODE=external`
-4. Create Logic App with weekly recurrence trigger
-5. Configure Logic App to POST to container endpoint
+| Method | Cost | Setup Complexity | Best For |
+|--------|------|------------------|----------|
+| **Local/Docker** | Free | Easy | Development, testing |
+| **GitHub Actions** | Free (with limits) | Easy | Most users, scheduled runs |
+| **AWS/GCP/Azure** | Pay-per-use | Moderate | Production, always-on, high availability |
 
 ## API Endpoints (External Scheduler Mode)
 
