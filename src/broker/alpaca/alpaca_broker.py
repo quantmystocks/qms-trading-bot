@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import List
 from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 
 from ..broker import Broker
@@ -109,23 +109,16 @@ class AlpacaBroker(Broker):
             # Calculate start date
             start_date = datetime.now() - timedelta(days=since_days)
             
-            # Get all orders from the specified period
-            # Alpaca API accepts datetime object or date string
-            try:
-                orders = self.client.get_orders(
-                    limit=500,  # Adjust as needed
-                    after=start_date,  # Try datetime object first
-                )
-            except:
-                # Fallback to date string format
-                try:
-                    orders = self.client.get_orders(
-                        limit=500,
-                        after=start_date.date().isoformat(),
-                    )
-                except:
-                    # If date filtering fails, get all recent orders and filter manually
-                    orders = self.client.get_orders(limit=500)
+            # Create GetOrdersRequest filter according to Alpaca API documentation
+            # get_orders() accepts a single 'filter' parameter of type GetOrdersRequest
+            filter_request = GetOrdersRequest(
+                status='all',  # Get all statuses (open, closed, all), we'll filter filled ones below
+                limit=500,  # Maximum number of orders (defaults to 50, max is 500)
+                after=start_date,  # Only orders submitted after this timestamp
+            )
+            
+            # Get orders using the filter request
+            orders = self.client.get_orders(filter=filter_request)
             
             trades = []
             for order in orders:
