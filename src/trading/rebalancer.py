@@ -256,7 +256,7 @@ class Rebalancer:
             logger.error(f"Error getting final allocations: {e}")
             final_allocations = []
         
-        return self._create_summary(buys, [], final_allocations)
+        return self._create_summary(buys, [], final_allocations, failed_trades=[])
     
     def _execute_week_over_week_rebalancing(
         self,
@@ -318,6 +318,7 @@ class Rebalancer:
         
         sells = []
         buys = []
+        failed_trades = []  # Track failed trades
         
         # Sell positions that dropped out of top 5
         total_proceeds = 0.0
@@ -332,6 +333,9 @@ class Rebalancer:
                         "symbol": symbol,
                         "quantity": allocation.quantity,
                         "proceeds": allocation.market_value,
+                        "status": "planned",
+                        "error": None,
+                        "order_id": None,
                     })
                     total_proceeds += allocation.market_value
                     logger.info(f"[{self.portfolio_name}] [DRY-RUN] Would sell {allocation.quantity} shares of {symbol} for ${allocation.market_value} (dropped out of top 5)")
@@ -415,6 +419,9 @@ class Rebalancer:
                                 "symbol": symbol,
                                 "quantity": allocation.quantity,
                                 "proceeds": allocation.market_value,
+                                "status": "submitted",
+                                "error": None,
+                                "order_id": order_id,
                             })
                             total_proceeds += allocation.market_value
                             logger.info(f"Sold {allocation.quantity} shares of {symbol} for ${allocation.market_value} (dropped out of top 5)")
@@ -456,9 +463,40 @@ class Rebalancer:
                                     self.persistence_manager._record_external_sale(external_sale)
                                     logger.info(f"[{self.portfolio_name}] Recorded external sale for deficit: {deficit_quantity:.2f} shares of {symbol} (~${estimated_proceeds:.2f}) - broker didn't have enough shares")
                         else:
+                            error_msg = f"Broker rejected sell order for {symbol}"
                             logger.warning(f"Failed to sell {symbol}")
+                            failed_trades.append({
+                                "symbol": symbol,
+                                "action": "SELL",
+                                "quantity": allocation.quantity,
+                                "error": error_msg,
+                            })
+                            sells.append({
+                                "symbol": symbol,
+                                "quantity": allocation.quantity,
+                                "proceeds": allocation.market_value,
+                                "status": "failed",
+                                "error": error_msg,
+                                "order_id": None,
+                            })
                     except Exception as e:
-                        logger.error(f"Error selling {symbol}: {e}")
+                        error_msg = f"Error selling {symbol}: {str(e)}"
+                        logger.error(error_msg)
+                        failed_trades.append({
+                            "symbol": symbol,
+                            "action": "SELL",
+                            "quantity": allocation.quantity if allocation else 0.0,
+                            "error": error_msg,
+                        })
+                        if allocation:
+                            sells.append({
+                                "symbol": symbol,
+                                "quantity": allocation.quantity,
+                                "proceeds": allocation.market_value,
+                                "status": "failed",
+                                "error": error_msg,
+                                "order_id": None,
+                            })
         
         # Use proceeds from sales + external sale proceeds to buy new stocks
         # Get current cash balance for logging purposes only
@@ -510,6 +548,9 @@ class Rebalancer:
                             "symbol": symbol,
                             "quantity": 0,  # Will be estimated
                             "cost": allocation_per_stock,
+                            "status": "planned",
+                            "error": None,
+                            "order_id": None,
                         })
                         if is_buyback and external_sales_by_symbol:
                             external_sale = external_sales_by_symbol.get(symbol)
@@ -522,11 +563,22 @@ class Rebalancer:
                     else:
                         try:
                             success = self.broker.buy(symbol, allocation_per_stock)
+                            # Try to get order ID if broker supports it
+                            order_id = None
+                            try:
+                                if hasattr(self.broker, '_last_order_id'):
+                                    order_id = getattr(self.broker, '_last_order_id', None)
+                            except:
+                                pass
+                            
                             if success:
                                 buys.append({
                                     "symbol": symbol,
                                     "quantity": 0,  # Will be updated
                                     "cost": allocation_per_stock,
+                                    "status": "submitted",
+                                    "error": None,
+                                    "order_id": order_id,
                                 })
                                 if is_buyback and external_sales_by_symbol:
                                     external_sale = external_sales_by_symbol.get(symbol)
@@ -567,9 +619,41 @@ class Rebalancer:
                                     )
                                     self.persistence_manager.record_trade(trade)
                             else:
+                                error_msg = f"Broker rejected buy order for {symbol}"
                                 logger.warning(f"Failed to buy {symbol}")
+                                failed_trades.append({
+                                    "symbol": symbol,
+                                    "action": "BUY",
+                                    "quantity": 0.0,
+                                    "cost": allocation_per_stock,
+                                    "error": error_msg,
+                                })
+                                buys.append({
+                                    "symbol": symbol,
+                                    "quantity": 0,
+                                    "cost": allocation_per_stock,
+                                    "status": "failed",
+                                    "error": error_msg,
+                                    "order_id": None,
+                                })
                         except Exception as e:
-                            logger.error(f"Error buying {symbol}: {e}")
+                            error_msg = f"Error buying {symbol}: {str(e)}"
+                            logger.error(error_msg)
+                            failed_trades.append({
+                                "symbol": symbol,
+                                "action": "BUY",
+                                "quantity": 0.0,
+                                "cost": allocation_per_stock,
+                                "error": error_msg,
+                            })
+                            buys.append({
+                                "symbol": symbol,
+                                "quantity": 0,
+                                "cost": allocation_per_stock,
+                                "status": "failed",
+                                "error": error_msg,
+                                "order_id": None,
+                            })
         
         # Get final allocations (use current if dry-run, since no trades were executed)
         try:
@@ -618,7 +702,7 @@ class Rebalancer:
             else:
                 logger.info(f"[{self.portfolio_name}] No rebalancing needed - all positions match leaderboard changes")
         
-        return self._create_summary(buys, sells, final_allocations)
+        return self._create_summary(buys, sells, final_allocations, failed_trades=failed_trades)
     
     def _filter_allocations_by_portfolio(self, allocations: List[Allocation]) -> List[Allocation]:
         """
@@ -662,6 +746,7 @@ class Rebalancer:
         buys: List[dict],
         sells: List[dict],
         final_allocations: List[Allocation],
+        failed_trades: Optional[List[dict]] = None,
     ) -> TradeSummary:
         """Create trade summary."""
         # Filter allocations to only include symbols owned by this portfolio
@@ -680,6 +765,7 @@ class Rebalancer:
             portfolio_value=portfolio_value,
             portfolio_name=self.portfolio_name,
             initial_capital=self.initial_capital,
+            failed_trades=failed_trades or [],
         )
         
         # Note: Email notification is handled in main.py after rebalancing completes

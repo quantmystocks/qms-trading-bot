@@ -270,18 +270,47 @@ class TradingBot:
                 logger.info("Executing rebalancing (Scheduled run - always executes)...")
         
         try:
-            # Execute rebalancing for each portfolio
-            portfolio_summaries: Dict[str, TradeSummary] = {}
+            # Calculate PRE-TRADE performance (before executing any trades)
+            # This shows current holdings vs initial capital
+            pre_trade_performances: Dict[str, PortfolioPerformance] = {}
+            pre_trade_allocations: Dict[str, List[Allocation]] = {}
             portfolio_leaderboards: Dict[str, List[str]] = {}
             
             if not self.rebalancers:
                 raise ValueError("No portfolios configured. Please set TRADE_INDICES environment variable.")
             
+            # First, get current holdings and calculate pre-trade performance
             for portfolio_name, rebalancer in self.rebalancers.items():
                 try:
-                    logger.info(f"[{portfolio_name}] Starting rebalancing...")
-                    summary = rebalancer.rebalance(dry_run=dry_run)
-                    portfolio_summaries[portfolio_name] = summary
+                    # Get current allocations (before trades)
+                    all_allocations = self.broker.get_current_allocation()
+                    filtered_allocations = rebalancer._filter_allocations_by_portfolio(all_allocations)
+                    pre_trade_allocations[portfolio_name] = filtered_allocations
+                    
+                    # Calculate pre-trade portfolio value
+                    pre_trade_value = sum(alloc.market_value for alloc in filtered_allocations)
+                    
+                    # Get ownership records for net_invested calculation
+                    ownership_records = {}
+                    if self.persistence_manager:
+                        ownership_records = self.persistence_manager.get_portfolio_ownership_records(portfolio_name)
+                    
+                    # Create a TradeSummary with current holdings (no trades yet)
+                    from ..broker.models import TradeSummary
+                    pre_trade_summary = TradeSummary(
+                        buys=[],
+                        sells=[],
+                        total_cost=0.0,
+                        total_proceeds=0.0,
+                        final_allocations=filtered_allocations,
+                        portfolio_value=pre_trade_value,
+                        portfolio_name=portfolio_name,
+                        initial_capital=rebalancer.initial_capital,
+                    )
+                    
+                    # Calculate pre-trade performance
+                    pre_trade_performance = self._calculate_portfolio_performance(portfolio_name, pre_trade_summary, ownership_records)
+                    pre_trade_performances[portfolio_name] = pre_trade_performance
                     
                     # Get leaderboard symbols for this portfolio
                     current_week_mom_day = self.leaderboard_client._get_previous_sunday()
@@ -291,6 +320,20 @@ class TradingBot:
                         index_id=rebalancer.index_id
                     )
                     portfolio_leaderboards[portfolio_name] = leaderboard_symbols
+                    
+                    logger.info(f"[{portfolio_name}] Pre-trade portfolio value: ${pre_trade_value:.2f}, Return: ${pre_trade_performance.total_return:.2f} ({pre_trade_performance.total_return_pct:.2f}%)")
+                except Exception as portfolio_error:
+                    logger.error(f"[{portfolio_name}] Error calculating pre-trade performance: {portfolio_error}")
+                    # Continue with other portfolios
+            
+            # Now execute rebalancing for each portfolio
+            portfolio_summaries: Dict[str, TradeSummary] = {}
+            
+            for portfolio_name, rebalancer in self.rebalancers.items():
+                try:
+                    logger.info(f"[{portfolio_name}] Starting rebalancing...")
+                    summary = rebalancer.rebalance(dry_run=dry_run)
+                    portfolio_summaries[portfolio_name] = summary
                     
                     logger.info(f"[{portfolio_name}] Rebalancing {'simulation' if dry_run else 'execution'} completed. Portfolio value: ${summary.portfolio_value:.2f}")
                 except Exception as portfolio_error:
@@ -303,25 +346,45 @@ class TradingBot:
                 for portfolio_name in portfolio_summaries.keys():
                     portfolio_ownership[portfolio_name] = self.persistence_manager.get_portfolio_ownership_records(portfolio_name)
             
-            # Calculate performance metrics for each portfolio
+            # Calculate POST-TRADE performance metrics for each portfolio (after trades)
             performances: Dict[str, PortfolioPerformance] = {}
             for portfolio_name, summary in portfolio_summaries.items():
                 ownership_records = portfolio_ownership.get(portfolio_name, {})
                 performance = self._calculate_portfolio_performance(portfolio_name, summary, ownership_records)
                 performances[portfolio_name] = performance
             
-            # Create multi-portfolio summary
+            # Create multi-portfolio summary with PRE-TRADE performance
             if len(portfolio_summaries) > 1:
+                # Create pre-trade summary (current holdings before trades)
+                pre_trade_summaries = {}
+                for name in portfolio_summaries.keys():
+                    perf = pre_trade_performances.get(name)
+                    if perf:
+                        pre_trade_summaries[name] = TradeSummary(
+                            buys=[],
+                            sells=[],
+                            total_cost=0.0,
+                            total_proceeds=0.0,
+                            final_allocations=pre_trade_allocations.get(name, []),
+                            portfolio_value=perf.current_value,
+                            portfolio_name=name,
+                            initial_capital=perf.initial_capital,
+                        )
+                pre_trade_multi_summary = self._create_multi_portfolio_summary(pre_trade_summaries, pre_trade_performances) if pre_trade_summaries else None
+                
+                # Create post-trade summary (after trades)
                 multi_summary = self._create_multi_portfolio_summary(portfolio_summaries, performances)
                 
                 # Send email notification if enabled (only in real execution mode)
                 if not dry_run and self.email_notifier and self.config.email.recipient:
                     try:
+                        # Send email with pre-trade performance and planned trades
                         self.email_notifier.send_trade_summary(
                             recipient=self.config.email.recipient,
                             trade_summary=multi_summary,
                             portfolio_leaderboards=portfolio_leaderboards,
                             portfolio_ownership=portfolio_ownership if portfolio_ownership else None,
+                            pre_trade_performance=pre_trade_multi_summary,  # Include pre-trade performance
                         )
                     except Exception as email_error:
                         logger.error(f"Error sending email notification: {email_error}")

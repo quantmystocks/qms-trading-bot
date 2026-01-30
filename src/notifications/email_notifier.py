@@ -17,26 +17,28 @@ class EmailNotifier(ABC):
         leaderboard_symbols: Optional[List[str]] = None,
         portfolio_leaderboards: Optional[Dict[str, List[str]]] = None,
         portfolio_ownership: Optional[Dict[str, Dict[str, Dict[str, float]]]] = None,
+        pre_trade_performance: Optional[MultiPortfolioSummary] = None,
     ) -> bool:
         """
         Send trade summary email.
         
         Args:
             recipient: Email recipient address
-            trade_summary: Trade summary data (single or multi-portfolio)
+            trade_summary: Trade summary data (single or multi-portfolio) - contains planned/executed trades
             leaderboard_symbols: List of symbols from leaderboard (for single portfolio)
             portfolio_leaderboards: Dict of portfolio_name -> symbols (for multi-portfolio)
             portfolio_ownership: Dict of portfolio_name -> {symbol: {quantity, total_cost, avg_price}}
+            pre_trade_performance: Optional pre-trade performance summary (current holdings before trades)
             
         Returns:
             True if email sent successfully, False otherwise
         """
         # Format content (handled by base class)
         html_content = self._format_trade_summary_html(
-            trade_summary, leaderboard_symbols, portfolio_leaderboards, portfolio_ownership
+            trade_summary, leaderboard_symbols, portfolio_leaderboards, portfolio_ownership, pre_trade_performance
         )
         text_content = self._format_trade_summary_text(
-            trade_summary, leaderboard_symbols, portfolio_leaderboards, portfolio_ownership
+            trade_summary, leaderboard_symbols, portfolio_leaderboards, portfolio_ownership, pre_trade_performance
         )
         
         # Determine subject
@@ -95,11 +97,12 @@ class EmailNotifier(ABC):
         leaderboard_symbols: Optional[List[str]] = None,
         portfolio_leaderboards: Optional[Dict[str, List[str]]] = None,
         portfolio_ownership: Optional[Dict[str, Dict[str, Dict[str, float]]]] = None,
+        pre_trade_performance: Optional[MultiPortfolioSummary] = None,
     ) -> str:
         """Format trade summary as HTML email."""
         # Check if it's multi-portfolio summary
         if isinstance(trade_summary, MultiPortfolioSummary):
-            return self._format_multi_portfolio_html(trade_summary, portfolio_leaderboards or {}, portfolio_ownership)
+            return self._format_multi_portfolio_html(trade_summary, portfolio_leaderboards or {}, portfolio_ownership, pre_trade_performance)
         
         # Single portfolio format
         html = f"""
@@ -203,6 +206,7 @@ class EmailNotifier(ABC):
         multi_summary: MultiPortfolioSummary,
         portfolio_leaderboards: Dict[str, List[str]],
         portfolio_ownership: Optional[Dict[str, Dict[str, Dict[str, float]]]] = None,
+        pre_trade_performance: Optional[MultiPortfolioSummary] = None,
     ) -> str:
         """Format multi-portfolio summary as HTML email."""
         html = f"""
@@ -219,14 +223,17 @@ class EmailNotifier(ABC):
                 .positive {{ color: #4CAF50; font-weight: bold; }}
                 .negative {{ color: #f44336; font-weight: bold; }}
                 .portfolio-section {{ margin: 30px 0; padding: 20px; border: 1px solid #ddd; }}
+                .planned-trades {{ background-color: #fff3cd; padding: 15px; margin: 20px 0; border-left: 4px solid #ffc107; }}
             </style>
         </head>
         <body>
             <h2>Portfolio Rebalancing Summary - Multi-Portfolio</h2>
             <p><strong>Date:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            <p><strong>Note:</strong> Trades are queued and will execute when filled. Performance below reflects current holdings before trades.</p>
             
+            {f'''
             <div class="summary">
-                <h3>Overall Performance</h3>
+                <h3>Current Performance (Before Trades)</h3>
                 <table>
                     <tr>
                         <th>Metric</th>
@@ -234,25 +241,76 @@ class EmailNotifier(ABC):
                     </tr>
                     <tr>
                         <td>Total Initial Capital</td>
-                        <td>${multi_summary.total_initial_capital:,.2f}</td>
+                        <td>${pre_trade_performance.total_initial_capital:,.2f}</td>
                     </tr>
                     <tr>
                         <td>Total Net Invested</td>
-                        <td>${multi_summary.total_net_invested:,.2f}</td>
+                        <td>${pre_trade_performance.total_net_invested:,.2f}</td>
                     </tr>
                     <tr>
                         <td>Total Current Value</td>
-                        <td>${multi_summary.total_current_value:,.2f}</td>
+                        <td>${pre_trade_performance.total_current_value:,.2f}</td>
                     </tr>
                     <tr>
                         <td>Overall Return</td>
-                        <td class="{'positive' if multi_summary.overall_return >= 0 else 'negative'}">
-                            ${multi_summary.overall_return:,.2f} ({multi_summary.overall_return_pct:.2f}%)
+                        <td class="{'positive' if pre_trade_performance.overall_return >= 0 else 'negative'}">
+                            ${pre_trade_performance.overall_return:,.2f} ({pre_trade_performance.overall_return_pct:.2f}%)
                         </td>
                     </tr>
                 </table>
             </div>
+            ''' if pre_trade_performance else ''}
             
+            <div class="planned-trades">
+                <h3>Trades Status Summary</h3>
+                <p>The following trades have been processed. Performance metrics reflect current holdings before trades.</p>
+                <table>
+                    <tr>
+                        <th>Portfolio</th>
+                        <th>Submitted Sells</th>
+                        <th>Submitted Buys</th>
+                        <th>Failed Trades</th>
+                    </tr>
+            """
+            
+            # Calculate trade status summary
+            for portfolio_name, summary in multi_summary.portfolios.items():
+                submitted_sells_count = len([s for s in summary.sells if s.get('status') == 'submitted'])
+                submitted_buys_count = len([b for b in summary.buys if b.get('status') == 'submitted'])
+                failed_count = len(summary.failed_trades) if summary.failed_trades else 0
+                
+                failed_class = "negative" if failed_count > 0 else ""
+                
+                html += f"""
+                    <tr>
+                        <td><strong>{portfolio_name}</strong></td>
+                        <td>{submitted_sells_count}</td>
+                        <td>{submitted_buys_count}</td>
+                        <td class="{failed_class}">{failed_count}</td>
+                    </tr>
+                """
+            
+            html += """
+                </table>
+            </div>
+            """
+            
+            if pre_trade_performance:
+                html += """
+            <h3>Portfolio Performance Summary (Current Holdings)</h3>
+            <table>
+                <tr>
+                    <th>Portfolio</th>
+                    <th>Initial Capital</th>
+                    <th>Current Value</th>
+                    <th>Return</th>
+                    <th>Return %</th>
+                    <th>Realized P&L</th>
+                    <th>Unrealized P&L</th>
+                </tr>
+            """
+            else:
+                html += """
             <h3>Portfolio Performance Summary</h3>
             <table>
                 <tr>
@@ -264,9 +322,12 @@ class EmailNotifier(ABC):
                     <th>Realized P&L</th>
                     <th>Unrealized P&L</th>
                 </tr>
-        """
+            """
         
-        for portfolio_name, performance in multi_summary.performances.items():
+        # Use pre-trade performance if available, otherwise fall back to multi_summary
+        performance_data = pre_trade_performance.performances if pre_trade_performance else multi_summary.performances
+        
+        for portfolio_name, performance in performance_data.items():
             return_class = "positive" if performance.total_return >= 0 else "negative"
             realized_class = "positive" if performance.realized_pnl >= 0 else "negative"
             unrealized_class = "positive" if performance.unrealized_pnl >= 0 else "negative"
@@ -303,7 +364,143 @@ class EmailNotifier(ABC):
                 </p>
             """
             
-            if summary.sells:
+            # Group trades by status
+            planned_sells = [s for s in summary.sells if s.get('status') == 'planned']
+            submitted_sells = [s for s in summary.sells if s.get('status') == 'submitted']
+            failed_sells = [s for s in summary.sells if s.get('status') == 'failed']
+            
+            planned_buys = [b for b in summary.buys if b.get('status') == 'planned']
+            submitted_buys = [b for b in summary.buys if b.get('status') == 'submitted']
+            failed_buys = [b for b in summary.buys if b.get('status') == 'failed']
+            
+            # Show failed trades prominently first
+            if failed_sells or failed_buys or (summary.failed_trades and len(summary.failed_trades) > 0):
+                html += """
+                <h4 style="color: #f44336;">⚠️ Failed Trades</h4>
+                <table style="border: 2px solid #f44336;">
+                    <tr>
+                        <th>Action</th>
+                        <th>Symbol</th>
+                        <th>Quantity</th>
+                        <th>Amount</th>
+                        <th>Error</th>
+                    </tr>
+                """
+                for trade in (summary.failed_trades or []):
+                    action = trade.get('action', 'UNKNOWN')
+                    symbol = trade.get('symbol', '')
+                    quantity = trade.get('quantity', 0.0)
+                    cost_or_proceeds = trade.get('cost') or trade.get('proceeds', 0.0)
+                    error = trade.get('error', 'Unknown error')
+                    html += f"""
+                    <tr>
+                        <td>{action}</td>
+                        <td>{symbol}</td>
+                        <td>{quantity:.2f}</td>
+                        <td>${cost_or_proceeds:.2f}</td>
+                        <td style="color: #f44336;">{error}</td>
+                    </tr>
+                    """
+                html += "</table>"
+            
+            # Show submitted trades
+            if submitted_sells:
+                html += """
+                <h4>✅ Stocks Sold (Submitted)</h4>
+                <table>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Quantity</th>
+                        <th>Proceeds</th>
+                        <th>Status</th>
+                        <th>Order ID</th>
+                    </tr>
+                """
+                for sell in submitted_sells:
+                    order_id = sell.get('order_id', 'N/A')
+                    html += f"""
+                    <tr>
+                        <td>{sell['symbol']}</td>
+                        <td>{sell['quantity']:.2f}</td>
+                        <td>${sell['proceeds']:.2f}</td>
+                        <td style="color: #4CAF50;">Submitted</td>
+                        <td>{order_id}</td>
+                    </tr>
+                    """
+                html += "</table>"
+            
+            if submitted_buys:
+                html += """
+                <h4>✅ Stocks Bought (Submitted)</h4>
+                <table>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Quantity</th>
+                        <th>Cost</th>
+                        <th>Status</th>
+                        <th>Order ID</th>
+                    </tr>
+                """
+                for buy in submitted_buys:
+                    order_id = buy.get('order_id', 'N/A')
+                    html += f"""
+                    <tr>
+                        <td>{buy['symbol']}</td>
+                        <td>{buy['quantity']:.2f}</td>
+                        <td>${buy['cost']:.2f}</td>
+                        <td style="color: #4CAF50;">Submitted</td>
+                        <td>{order_id}</td>
+                    </tr>
+                    """
+                html += "</table>"
+            
+            # Show planned trades (dry-run or not yet executed)
+            if planned_sells:
+                html += """
+                <h4>📋 Stocks to Sell (Planned)</h4>
+                <table>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Quantity</th>
+                        <th>Proceeds</th>
+                        <th>Status</th>
+                    </tr>
+                """
+                for sell in planned_sells:
+                    html += f"""
+                    <tr>
+                        <td>{sell['symbol']}</td>
+                        <td>{sell['quantity']:.2f}</td>
+                        <td>${sell['proceeds']:.2f}</td>
+                        <td style="color: #ff9800;">Planned</td>
+                    </tr>
+                    """
+                html += "</table>"
+            
+            if planned_buys:
+                html += """
+                <h4>📋 Stocks to Buy (Planned)</h4>
+                <table>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Quantity</th>
+                        <th>Cost</th>
+                        <th>Status</th>
+                    </tr>
+                """
+                for buy in planned_buys:
+                    html += f"""
+                    <tr>
+                        <td>{buy['symbol']}</td>
+                        <td>{buy['quantity']:.2f}</td>
+                        <td>${buy['cost']:.2f}</td>
+                        <td style="color: #ff9800;">Planned</td>
+                    </tr>
+                    """
+                html += "</table>"
+            
+            # Legacy support: if no status field, show all trades as submitted
+            if not any(s.get('status') for s in summary.sells) and summary.sells:
                 html += """
                 <h4>Stocks Sold</h4>
                 <table>
@@ -323,7 +520,7 @@ class EmailNotifier(ABC):
                     """
                 html += "</table>"
             
-            if summary.buys:
+            if not any(b.get('status') for b in summary.buys) and summary.buys:
                 html += """
                 <h4>Stocks Bought</h4>
                 <table>
@@ -461,11 +658,12 @@ class EmailNotifier(ABC):
         leaderboard_symbols: Optional[List[str]] = None,
         portfolio_leaderboards: Optional[Dict[str, List[str]]] = None,
         portfolio_ownership: Optional[Dict[str, Dict[str, Dict[str, float]]]] = None,
+        pre_trade_performance: Optional[MultiPortfolioSummary] = None,
     ) -> str:
         """Format trade summary as plain text email."""
         # Check if it's multi-portfolio summary
         if isinstance(trade_summary, MultiPortfolioSummary):
-            return self._format_multi_portfolio_text(trade_summary, portfolio_leaderboards or {}, portfolio_ownership)
+            return self._format_multi_portfolio_text(trade_summary, portfolio_leaderboards or {}, portfolio_ownership, pre_trade_performance)
         
         # Single portfolio format
         text = f"""
@@ -501,22 +699,48 @@ Leaderboard Top 5: {', '.join(leaderboard_symbols or [])}
         multi_summary: MultiPortfolioSummary,
         portfolio_leaderboards: Dict[str, List[str]],
         portfolio_ownership: Optional[Dict[str, Dict[str, Dict[str, float]]]] = None,
+        pre_trade_performance: Optional[MultiPortfolioSummary] = None,
     ) -> str:
         """Format multi-portfolio summary as plain text email."""
         text = f"""
 Portfolio Rebalancing Summary - Multi-Portfolio
 Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Note: Trades are queued and will execute when filled. Performance metrics will be updated once trades are executed.
 
-=== Overall Performance ===
-Total Initial Capital: ${multi_summary.total_initial_capital:,.2f}
-Total Net Invested: ${multi_summary.total_net_invested:,.2f}
-Total Current Value: ${multi_summary.total_current_value:,.2f}
-Overall Return: ${multi_summary.overall_return:,.2f} ({multi_summary.overall_return_pct:.2f}%)
+{f'''
+=== Current Performance (Before Trades) ===
+Total Initial Capital: ${pre_trade_performance.total_initial_capital:,.2f}
+Total Net Invested: ${pre_trade_performance.total_net_invested:,.2f}
+Total Current Value: ${pre_trade_performance.total_current_value:,.2f}
+Overall Return: ${pre_trade_performance.overall_return:,.2f} ({pre_trade_performance.overall_return_pct:.2f}%)
 
-=== Portfolio Performance Summary ===
+''' if pre_trade_performance else ''}
+=== Trades Status Summary ===
 """
         
-        for portfolio_name, performance in multi_summary.performances.items():
+        # Calculate trade status summary
+        for portfolio_name, summary in multi_summary.portfolios.items():
+            submitted_sells_count = len([s for s in summary.sells if s.get('status') == 'submitted'])
+            submitted_buys_count = len([b for b in summary.buys if b.get('status') == 'submitted'])
+            failed_count = len(summary.failed_trades) if summary.failed_trades else 0
+            
+            text += f"""
+{portfolio_name}:
+  Submitted Sells: {submitted_sells_count}
+  Submitted Buys: {submitted_buys_count}
+  Failed Trades: {failed_count}
+"""
+        
+        text += """
+=== Trade Details ===
+
+=== Portfolio Performance Summary (Current Holdings) ===
+"""
+        
+        # Use pre-trade performance if available, otherwise fall back to multi_summary
+        performance_data = pre_trade_performance.performances if pre_trade_performance else multi_summary.performances
+        
+        for portfolio_name, performance in performance_data.items():
             text += f"""
 {portfolio_name}:
   Initial Capital: ${performance.initial_capital:,.2f}
@@ -538,13 +762,63 @@ Performance: ${performance.total_return:,.2f} ({performance.total_return_pct:.2f
 
 """
             
-            if summary.sells:
+            # Group trades by status
+            planned_sells = [s for s in summary.sells if s.get('status') == 'planned']
+            submitted_sells = [s for s in summary.sells if s.get('status') == 'submitted']
+            failed_sells = [s for s in summary.sells if s.get('status') == 'failed']
+            
+            planned_buys = [b for b in summary.buys if b.get('status') == 'planned']
+            submitted_buys = [b for b in summary.buys if b.get('status') == 'submitted']
+            failed_buys = [b for b in summary.buys if b.get('status') == 'failed']
+            
+            # Show failed trades prominently first
+            if failed_sells or failed_buys or (summary.failed_trades and len(summary.failed_trades) > 0):
+                text += "⚠️ FAILED TRADES:\n"
+                for trade in (summary.failed_trades or []):
+                    action = trade.get('action', 'UNKNOWN')
+                    symbol = trade.get('symbol', '')
+                    quantity = trade.get('quantity', 0.0)
+                    cost_or_proceeds = trade.get('cost') or trade.get('proceeds', 0.0)
+                    error = trade.get('error', 'Unknown error')
+                    text += f"  - {action} {symbol}: {quantity:.2f} shares, ${cost_or_proceeds:.2f} - ERROR: {error}\n"
+                text += "\n"
+            
+            # Show submitted trades
+            if submitted_sells:
+                text += "✅ Stocks Sold (Submitted):\n"
+                for sell in submitted_sells:
+                    order_id = sell.get('order_id', 'N/A')
+                    text += f"  - {sell['symbol']}: {sell['quantity']:.2f} shares, ${sell['proceeds']:.2f} [Order ID: {order_id}]\n"
+                text += "\n"
+            
+            if submitted_buys:
+                text += "✅ Stocks Bought (Submitted):\n"
+                for buy in submitted_buys:
+                    order_id = buy.get('order_id', 'N/A')
+                    text += f"  - {buy['symbol']}: {buy['quantity']:.2f} shares, ${buy['cost']:.2f} [Order ID: {order_id}]\n"
+                text += "\n"
+            
+            # Show planned trades
+            if planned_sells:
+                text += "📋 Stocks to Sell (Planned):\n"
+                for sell in planned_sells:
+                    text += f"  - {sell['symbol']}: {sell['quantity']:.2f} shares, ${sell['proceeds']:.2f} [Planned]\n"
+                text += "\n"
+            
+            if planned_buys:
+                text += "📋 Stocks to Buy (Planned):\n"
+                for buy in planned_buys:
+                    text += f"  - {buy['symbol']}: {buy['quantity']:.2f} shares, ${buy['cost']:.2f} [Planned]\n"
+                text += "\n"
+            
+            # Legacy support: if no status field, show all trades as submitted
+            if not any(s.get('status') for s in summary.sells) and summary.sells:
                 text += "Stocks Sold:\n"
                 for sell in summary.sells:
                     text += f"  - {sell['symbol']}: {sell['quantity']:.2f} shares, ${sell['proceeds']:.2f}\n"
                 text += "\n"
             
-            if summary.buys:
+            if not any(b.get('status') for b in summary.buys) and summary.buys:
                 text += "Stocks Bought:\n"
                 for buy in summary.buys:
                     text += f"  - {buy['symbol']}: {buy['quantity']:.2f} shares, ${buy['cost']:.2f}\n"

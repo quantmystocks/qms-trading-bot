@@ -1,6 +1,6 @@
 """Data models for broker positions and allocations."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 
 
@@ -28,14 +28,15 @@ class Allocation:
 class TradeSummary:
     """Summary of trades executed during rebalancing."""
     
-    buys: List[dict]  # List of {"symbol": str, "quantity": float, "cost": float}
-    sells: List[dict]  # List of {"symbol": str, "quantity": float, "proceeds": float}
+    buys: List[dict]  # List of {"symbol": str, "quantity": float, "cost": float, "status": str, "error": str}
+    sells: List[dict]  # List of {"symbol": str, "quantity": float, "proceeds": float, "status": str, "error": str}
     total_cost: float
     total_proceeds: float
     final_allocations: List[Allocation]
     portfolio_value: float
     portfolio_name: str = "SP400"  # Default for backward compatibility
     initial_capital: float = 0.0  # Track initial capital for performance calculation
+    failed_trades: List[dict] = field(default_factory=list)  # List of failed trades with error messages
 
 
 @dataclass
