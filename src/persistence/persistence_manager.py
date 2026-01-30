@@ -738,6 +738,9 @@ class PersistenceManager:
         Updates ownership records to match actual broker positions.
         This fixes cases where quantities were incorrectly calculated.
         
+        IMPORTANT: Only reconciles if all recent trades have filled. Skips reconciliation
+        if there are any unfilled trades to avoid incorrect quantity updates.
+        
         Args:
             broker_allocations: List of Allocation objects from broker
             portfolio_name: Portfolio name to reconcile
@@ -749,6 +752,11 @@ class PersistenceManager:
                 'fixed': int      # Number of records with quantity corrections
             }
         """
+        # Check if there are recent unfilled trades
+        if self.has_recent_unfilled_trades(portfolio_name):
+            logger.info(f"[{portfolio_name}] Skipping ownership reconciliation - trades are still pending fill")
+            return {'updated': 0, 'fixed': 0}
+        
         # Get broker positions for this portfolio
         broker_positions = {}
         for alloc in broker_allocations:
@@ -820,6 +828,52 @@ class PersistenceManager:
             'updated': updated_count,
             'fixed': fixed_count
         }
+    
+    def has_recent_unfilled_trades(self, portfolio_name: str, hours: int = 24) -> bool:
+        """
+        Check if there are recent unfilled trades for a portfolio.
+        
+        Args:
+            portfolio_name: Portfolio name to check
+            hours: Time window in hours to check (default 24)
+            
+        Returns:
+            True if there are unfilled trades, False otherwise
+        """
+        trades_ref = self.db.collection('trades')
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        
+        if FieldFilter:
+            query = trades_ref.where(filter=FieldFilter('portfolio_name', '==', portfolio_name))
+        else:
+            query = trades_ref.where('portfolio_name', '==', portfolio_name)
+        
+        for doc in query.stream():
+            data = doc.to_dict()
+            timestamp = data.get('timestamp')
+            reconciliation_status = data.get('reconciliation_status')
+            
+            # Check if trade is recent and unfilled
+            if timestamp:
+                if hasattr(timestamp, 'timestamp'):
+                    trade_time = datetime.fromtimestamp(timestamp.timestamp())
+                elif isinstance(timestamp, datetime):
+                    trade_time = timestamp
+                else:
+                    continue
+                
+                if trade_time >= cutoff_time:
+                    # Check if trade is unfilled
+                    if reconciliation_status == 'unfilled':
+                        return True
+                    # Also check if trade has no valid fill data (quantity/price/total)
+                    quantity = data.get('quantity', 0.0)
+                    price = data.get('price', 0.0)
+                    total = data.get('total', 0.0)
+                    if quantity <= 0 or price <= 0 or total <= 0:
+                        return True
+        
+        return False
     
     def recalculate_ownership_from_trades(self, portfolio_name: str) -> dict:
         """
