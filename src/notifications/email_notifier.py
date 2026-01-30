@@ -271,7 +271,7 @@ class EmailNotifier(ABC):
                         <th>Submitted Buys</th>
                         <th>Failed Trades</th>
                     </tr>
-            """
+        """
         
         # Calculate trade status summary
         for portfolio_name, summary in multi_summary.portfolios.items():
@@ -296,7 +296,7 @@ class EmailNotifier(ABC):
             """
         
         if pre_trade_performance:
-                html += """
+            html += """
             <h3>Portfolio Performance Summary (Current Holdings)</h3>
             <table>
                 <tr>
@@ -309,8 +309,8 @@ class EmailNotifier(ABC):
                     <th>Unrealized P&L</th>
                 </tr>
             """
-            else:
-                html += """
+        else:
+            html += """
             <h3>Portfolio Performance Summary</h3>
             <table>
                 <tr>
