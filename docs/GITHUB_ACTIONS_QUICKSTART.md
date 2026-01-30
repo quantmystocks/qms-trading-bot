@@ -4,7 +4,7 @@ Get your QMS Trading Bot running on GitHub Actions in 5 minutes!
 
 ## ✅ Prerequisites
 
-- Your code is pushed to GitHub (already done ✅)
+- Your code is pushed to GitHub (already done ✅) - Fork this repo to  your own space
 - You have your API keys and credentials ready
 - The workflow file is already created at `.github/workflows/trading-bot.yml`
 
