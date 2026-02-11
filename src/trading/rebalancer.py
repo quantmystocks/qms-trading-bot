@@ -844,21 +844,17 @@ class Rebalancer:
         for alloc in allocations:
             symbol = alloc.symbol.upper()
             if symbol in owned_symbols:
-                # Check if multiple portfolios own this symbol
-                portfolios_owning = self.persistence_manager.get_all_portfolios_owning_symbol(symbol)
-                if len(portfolios_owning) > 1:
-                    # Multiple portfolios own this - calculate this portfolio's fraction
-                    portfolio_fraction = self.persistence_manager.get_portfolio_fraction(symbol, self.portfolio_name)
+                # Use the ownership record quantity (what the bot actually bought),
+                # not the broker's total position (which may include manually held shares)
+                owned_quantity = self.persistence_manager.get_ownership_quantity(symbol, self.portfolio_name)
+                if owned_quantity > 0:
                     filtered_allocations.append(Allocation(
                         symbol=alloc.symbol,
-                        quantity=alloc.quantity * portfolio_fraction,
+                        quantity=owned_quantity,
                         current_price=alloc.current_price,
-                        market_value=alloc.market_value * portfolio_fraction,
+                        market_value=owned_quantity * alloc.current_price,
                     ))
-                else:
-                    # Only this portfolio owns it - use full allocation
-                    filtered_allocations.append(alloc)
-        
+
         return filtered_allocations
     
     def _create_summary(
