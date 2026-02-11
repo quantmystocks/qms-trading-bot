@@ -318,18 +318,17 @@ class Rebalancer:
                 except Exception as e:
                     logger.warning(f"[{self.portfolio_name}] Error reconciling ownership: {e}")
             
-            # Update quantities in buys
+            # Update quantities in buys using cost/price (not total broker position)
             for buy in buys:
                 for alloc in final_allocations:
                     if alloc.symbol.upper() == buy["symbol"].upper():
-                        buy["quantity"] = alloc.quantity
-                        # Update persistence trade record quantity if needed
-                        # (Ownership is already updated in record_trade, so this is mainly for logging)
+                        if alloc.current_price > 0:
+                            buy["quantity"] = round(buy["cost"] / alloc.current_price, 2)
                         break
         except Exception as e:
             logger.error(f"Error getting final allocations: {e}")
             final_allocations = []
-        
+
         return self._create_summary(buys, [], final_allocations, failed_trades=failed_trades)
     
     def _execute_week_over_week_rebalancing(
@@ -797,17 +796,13 @@ class Rebalancer:
                 except Exception as e:
                     logger.warning(f"[{self.portfolio_name}] Error reconciling ownership: {e}")
             
-            # Update quantities in buys (only if not dry-run, since in dry-run we don't have actual quantities)
+            # Update quantities in buys using cost/price (not total broker position)
             if not dry_run:
                 for buy in buys:
                     for alloc in final_allocations:
                         if alloc.symbol.upper() == buy["symbol"].upper():
-                            buy["quantity"] = alloc.quantity
-                            # Update persistence trade record with actual quantity
-                            if self.persistence_manager:
-                                # Find the most recent BUY trade for this symbol and update quantity
-                                # Note: This is a simplification - in production you might want to track trade IDs
-                                pass  # Quantity update handled in record_trade via ownership update
+                            if alloc.current_price > 0:
+                                buy["quantity"] = round(buy["cost"] / alloc.current_price, 2)
                             break
         except Exception as e:
             logger.error(f"Error getting final allocations: {e}")

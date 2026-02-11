@@ -540,8 +540,15 @@ class EmailNotifier(ABC):
                     """
                 html += "</table>"
             
-            # Add current holdings with purchase prices and gains
-            if summary.final_allocations:
+            # Add current holdings - only for stocks traded by the algo in this run
+            traded_symbols = set()
+            for buy in summary.buys:
+                traded_symbols.add(buy['symbol'].upper())
+            for sell in summary.sells:
+                traded_symbols.add(sell['symbol'].upper())
+
+            traded_allocations = [a for a in summary.final_allocations if a.symbol.upper() in traded_symbols]
+            if traded_allocations:
                 ownership_data = (portfolio_ownership or {}).get(portfolio_name, {})
                 html += """
                 <h4>Current Holdings</h4>
@@ -557,21 +564,21 @@ class EmailNotifier(ABC):
                         <th>Gain %</th>
                     </tr>
                 """
-                for allocation in summary.final_allocations:
+                for allocation in traded_allocations:
                     symbol = allocation.symbol.upper()
                     ownership = ownership_data.get(symbol, {})
                     avg_price = ownership.get('avg_price', 0.0)
                     cost_basis = ownership.get('total_cost', 0.0)
-                    
+
                     # If we don't have ownership data, use current price as estimate
                     if avg_price == 0.0 and allocation.current_price > 0:
                         avg_price = allocation.current_price
                         cost_basis = allocation.market_value
-                    
+
                     gain_loss = allocation.market_value - cost_basis
                     gain_pct = (gain_loss / cost_basis * 100) if cost_basis > 0 else 0.0
                     gain_class = "positive" if gain_loss >= 0 else "negative"
-                    
+
                     html += f"""
                     <tr>
                         <td>{allocation.symbol}</td>
@@ -824,25 +831,32 @@ Performance: ${performance.total_return:,.2f} ({performance.total_return_pct:.2f
                     text += f"  - {buy['symbol']}: {buy['quantity']:.2f} shares, ${buy['cost']:.2f}\n"
                 text += "\n"
             
-            # Add current holdings with purchase prices and gains
-            if summary.final_allocations:
+            # Add current holdings - only for stocks traded by the algo in this run
+            traded_symbols_text = set()
+            for buy in summary.buys:
+                traded_symbols_text.add(buy['symbol'].upper())
+            for sell in summary.sells:
+                traded_symbols_text.add(sell['symbol'].upper())
+
+            traded_allocs_text = [a for a in summary.final_allocations if a.symbol.upper() in traded_symbols_text]
+            if traded_allocs_text:
                 ownership_data = (portfolio_ownership or {}).get(portfolio_name, {})
                 text += "Current Holdings:\n"
-                for allocation in summary.final_allocations:
+                for allocation in traded_allocs_text:
                     symbol = allocation.symbol.upper()
                     ownership = ownership_data.get(symbol, {})
                     avg_price = ownership.get('avg_price', 0.0)
                     cost_basis = ownership.get('total_cost', 0.0)
-                    
+
                     # If we don't have ownership data, use current price as estimate
                     if avg_price == 0.0 and allocation.current_price > 0:
                         avg_price = allocation.current_price
                         cost_basis = allocation.market_value
-                    
+
                     gain_loss = allocation.market_value - cost_basis
                     gain_pct = (gain_loss / cost_basis * 100) if cost_basis > 0 else 0.0
                     gain_sign = "+" if gain_loss >= 0 else ""
-                    
+
                     text += f"  - {allocation.symbol}: {allocation.quantity:.2f} shares\n"
                     text += f"    Purchase Price: ${avg_price:.2f} | Current Price: ${allocation.current_price:.2f}\n"
                     text += f"    Cost Basis: ${cost_basis:.2f} | Market Value: ${allocation.market_value:.2f}\n"
