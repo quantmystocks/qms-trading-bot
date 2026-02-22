@@ -58,7 +58,7 @@ SECTION_KEYS = {
     },
     "persistence": {
         "PERSISTENCE_ENABLED", "FIREBASE_PROJECT_ID", "FIREBASE_CREDENTIALS_JSON",
-        "FIRESTORE_DATABASE_ID", "PERSISTENCE_COLLECTION_PREFIX",
+        "FIRESTORE_DATABASE", "ENVIRONMENT",
     },
     "scheduler": {"SCHEDULER_MODE", "CRON_SCHEDULE", "SCHEDULER_TIMEZONE", "WEBHOOK_PORT", "WEBHOOK_SECRET"},
 }
@@ -491,15 +491,16 @@ def setup_persistence(config):
     else:
         config = setup_firebase_existing(config)
 
-    # Optional: isolate data per environment (same project)
+    # Persistence: single database name; collection prefix is always env_
     if config.get("PERSISTENCE_ENABLED") == "true":
-        if prompt_yes_no("Use a collection prefix for this environment? (recommended if you'll run paper + live with same Firebase project)", default=False):
-            prefix = prompt("Collection prefix (e.g. paper_ or live_)", default=config.get("PERSISTENCE_COLLECTION_PREFIX", "paper_"))
-            if prefix and not prefix.endswith("_"):
-                prefix = f"{prefix}_"
-            config["PERSISTENCE_COLLECTION_PREFIX"] = prefix or ""
-        if prompt_yes_no("Use a different Firestore database for this environment? (e.g. database 'live' in same project)", default=False):
-            config["FIRESTORE_DATABASE_ID"] = prompt("Firestore database ID", default=config.get("FIRESTORE_DATABASE_ID", "live"))
+        config["FIRESTORE_DATABASE"] = prompt(
+            "Firestore database name",
+            default=config.get("FIRESTORE_DATABASE", "(default)"),
+        )
+        config["ENVIRONMENT"] = prompt(
+            "Environment name (used as collection prefix, e.g. paper -> paper_)",
+            default=config.get("ENVIRONMENT", "paper"),
+        )
 
     return config
 
@@ -901,11 +902,7 @@ def write_env_file(config, overwrite=False):
 
     persistence_keys = ["PERSISTENCE_ENABLED"]
     if config.get("PERSISTENCE_ENABLED") == "true":
-        persistence_keys.extend(["FIREBASE_PROJECT_ID", "FIREBASE_CREDENTIALS_PATH"])
-        if config.get("FIRESTORE_DATABASE_ID"):
-            persistence_keys.append("FIRESTORE_DATABASE_ID")
-        if config.get("PERSISTENCE_COLLECTION_PREFIX"):
-            persistence_keys.append("PERSISTENCE_COLLECTION_PREFIX")
+        persistence_keys.extend(["FIREBASE_PROJECT_ID", "FIREBASE_CREDENTIALS_PATH", "FIRESTORE_DATABASE", "ENVIRONMENT"])
     add_section("Persistence", persistence_keys)
 
     env_path.write_text("\n".join(lines) + "\n")
@@ -979,7 +976,7 @@ def push_to_github(config, env_name_override=None, only_keys=None):
         "SENDGRID_API_KEY", "SENDGRID_FROM_EMAIL",
         "AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "SES_FROM_EMAIL",
         "FIREBASE_PROJECT_ID", "FIREBASE_CREDENTIALS_JSON",
-        "PERSISTENCE_ENABLED", "FIRESTORE_DATABASE_ID", "PERSISTENCE_COLLECTION_PREFIX",
+        "PERSISTENCE_ENABLED", "FIRESTORE_DATABASE", "ENVIRONMENT",
         "SCHEDULER_MODE", "CRON_SCHEDULE", "SCHEDULER_TIMEZONE", "WEBHOOK_PORT", "WEBHOOK_SECRET",
     }
 

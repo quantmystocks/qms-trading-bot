@@ -31,26 +31,26 @@ class PersistenceManager:
         project_id: str,
         credentials_path: Optional[str] = None,
         credentials_json: Optional[str] = None,
-        database_id: Optional[str] = None,
-        collection_prefix: Optional[str] = None,
+        database: str = "(default)",
+        collection_prefix: str = "",
     ):
         """
         Initialize Firebase connection.
-        
+
         Args:
             project_id: Firebase project ID
             credentials_path: Path to Firebase service account JSON file (optional if credentials_json is provided)
             credentials_json: Firebase service account JSON as string (optional if credentials_path is provided)
-            database_id: Firestore database ID, e.g. '(default)' or 'live'. Omit/None to use default database.
-            collection_prefix: Prefix for collection names, e.g. 'paper_' or 'live_' to isolate environments in same DB.
+            database: Firestore database name (e.g. "(default)" or "live"). Single database for all data.
+            collection_prefix: Prefix for all collection names (e.g. "paper_" or "live_"), derived from ENVIRONMENT.
         """
         if not FIREBASE_AVAILABLE:
             raise ImportError("firebase-admin is not installed. Install it with: pip install firebase-admin")
-        
+
         # Validate that at least one credential method is provided
         if not credentials_path and not credentials_json:
             raise ValueError("Either credentials_path or credentials_json must be provided")
-        
+
         # Initialize Firebase Admin SDK
         if credentials_json:
             # Parse JSON string and create credentials from dict
@@ -64,18 +64,16 @@ class PersistenceManager:
             if not os.path.exists(credentials_path):
                 raise FileNotFoundError(f"Firebase credentials file not found: {credentials_path}")
             cred = credentials.Certificate(credentials_path)
-        
+
         try:
             firebase_admin.initialize_app(cred, {'projectId': project_id})
         except ValueError:
             # App already initialized (e.g., in tests)
             pass
-        
-        # Use named database if specified (same project, different DB for e.g. paper vs live)
-        if database_id and database_id != "(default)":
-            self.db = firestore.client(database_id=database_id)
-        else:
-            self.db = firestore.client()
+
+        # Single database; collections are always prefixed by env (e.g. paper_trades, live_trades)
+        db_name = (database or "(default)").strip()
+        self.db = firestore.client(database_id=db_name)
         self.project_id = project_id
         self._collection_prefix = (collection_prefix or "").strip()
     

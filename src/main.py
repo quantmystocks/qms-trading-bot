@@ -95,8 +95,8 @@ class TradingBot:
                         project_id=self.config.persistence.project_id,
                         credentials_path=self.config.persistence.credentials_path,
                         credentials_json=self.config.persistence.credentials_json,
-                        database_id=self.config.persistence.database_id,
-                        collection_prefix=self.config.persistence.collection_prefix or "",
+                        database=self.config.persistence.database,
+                        collection_prefix=self.config.persistence.collection_prefix,
                     )
                     logger.info("Initialized persistence manager (Firebase Firestore)")
 
@@ -162,7 +162,7 @@ class TradingBot:
             self.rebalancers[portfolio_config.portfolio_name] = rebalancer
             logger.info(f"Initialized rebalancer for {portfolio_config.portfolio_name} portfolio (index {portfolio_config.index_id}, stockcount={stockcount}, slack={slack})")
 
-            # Initialize cash balance for this portfolio
+            # Initialize cash balance for this portfolio (required when persistence is enabled)
             if self.cash_manager:
                 self.cash_manager.initialize(
                     portfolio_config.portfolio_name,

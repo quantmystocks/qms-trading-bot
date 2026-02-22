@@ -91,19 +91,16 @@ def verify_firebase():
         })
         print("   ✓ Firebase initialized successfully")
         
-        # Get Firestore client (optionally a named database and collection prefix)
-        database_id = os.getenv("FIRESTORE_DATABASE_ID") or None
-        collection_prefix = (os.getenv("PERSISTENCE_COLLECTION_PREFIX") or "").strip()
-        if database_id and database_id != "(default)":
-            print(f"   Database ID: {database_id}")
+        # Single database name; collection prefix from ENVIRONMENT
+        database = (os.getenv("FIRESTORE_DATABASE") or "(default)").strip()
+        env_name = (os.getenv("ENVIRONMENT") or "").strip().lower()
+        collection_prefix = f"{env_name}_" if env_name else ""
+        print(f"   Database: {database}")
         if collection_prefix:
             print(f"   Collection prefix: {collection_prefix}")
         print("\n2. Connecting to Firestore...")
         try:
-            if database_id and database_id != "(default)":
-                db = firestore.client(database_id=database_id)
-            else:
-                db = firestore.client()
+            db = firestore.client(database_id=database)
             print("   ✓ Connected to Firestore")
         except Exception as e:
             error_msg = str(e)
@@ -131,17 +128,16 @@ def verify_firebase():
         
         for collection_name in collections:
             try:
-                # Try to read from collection (will create it if it doesn't exist)
+                # Create collection with a placeholder doc so it appears in Firestore console
+                # (Firestore does not list empty collections in the Data tab)
                 full_name = f"{collection_prefix}{collection_name}"
                 collection_ref = db.collection(full_name)
-                # Create a test document to ensure collection exists
-                test_doc_ref = collection_ref.document('_setup_test')
+                test_doc_ref = collection_ref.document('_verified')
                 test_doc_ref.set({
                     'created_at': firestore.SERVER_TIMESTAMP,
-                    'setup_date': datetime.now().isoformat(),
+                    'verified': True,
+                    'note': 'Placeholder from verify-firebase.py; safe to delete after bot has written real data',
                 })
-                # Delete test document
-                test_doc_ref.delete()
                 print(f"   ✓ Collection '{full_name}' verified")
             except Exception as e:
                 error_msg = str(e)

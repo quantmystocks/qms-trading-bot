@@ -148,9 +148,10 @@ class PersistenceConfig(BaseModel):
     project_id: Optional[str] = Field(default=None, description="Firebase project ID")
     credentials_path: Optional[str] = Field(default=None, description="Path to Firebase service account JSON file")
     credentials_json: Optional[str] = Field(default=None, description="Firebase service account JSON as string (alternative to credentials_path)")
-    # Isolate data per environment: use a different Firestore database and/or collection prefix
-    database_id: Optional[str] = Field(default=None, description="Firestore database ID, e.g. '(default)' or 'live'. Omit to use default database.")
-    collection_prefix: Optional[str] = Field(default="", description="Prefix for collection names, e.g. 'paper_' or 'live_' to avoid clashes between environments in the same DB.")
+    # Single Firestore database name (e.g. "(default)" or "live"). Required when persistence enabled.
+    database: str = Field(default="(default)", description="Firestore database name (use '(default)' for default DB)")
+    # Collection prefix derived from ENVIRONMENT (e.g. paper -> paper_, live -> live_). Always applied.
+    collection_prefix: str = Field(default="", description="Prefix for all collection names (e.g. paper_, live_)")
 
     def is_configured(self) -> bool:
         """Check if Firebase credentials are configured."""
@@ -262,20 +263,23 @@ class Config(BaseModel):
         persistence_project_id = os.getenv("FIREBASE_PROJECT_ID")
         persistence_credentials_path = os.getenv("FIREBASE_CREDENTIALS_PATH")
         persistence_credentials_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
-        persistence_database_id = os.getenv("FIRESTORE_DATABASE_ID") or None
-        persistence_collection_prefix = (os.getenv("PERSISTENCE_COLLECTION_PREFIX") or "").strip()
-        
+        # Single database name (e.g. "(default)" or "live")
+        persistence_database = (os.getenv("FIRESTORE_DATABASE") or "(default)").strip()
+        # Collection prefix always from env name (e.g. ENVIRONMENT=paper -> paper_)
+        env_name = (os.getenv("ENVIRONMENT") or "").strip().lower()
+        persistence_collection_prefix = f"{env_name}_" if env_name else ""
+
         # Auto-enable if credentials are configured (even if PERSISTENCE_ENABLED is not explicitly true)
         if persistence_project_id and (persistence_credentials_path or persistence_credentials_json):
             persistence_enabled = True
-        
+
         persistence_config = PersistenceConfig(
             enabled=persistence_enabled,
             project_id=persistence_project_id,
             credentials_path=persistence_credentials_path,
             credentials_json=persistence_credentials_json,
-            database_id=persistence_database_id,
-            collection_prefix=persistence_collection_prefix or None,
+            database=persistence_database,
+            collection_prefix=persistence_collection_prefix,
         )
         
         # Handle INITIAL_CAPITAL with proper default for empty strings
@@ -323,7 +327,14 @@ class Config(BaseModel):
                 "Please set PERSISTENCE_ENABLED=true and configure Firebase credentials, "
                 "or use a single portfolio (TRADE_INDICES=SP400)."
             )
-        
+
+        # Persistence requires ENVIRONMENT so collections use env prefix (e.g. paper_, live_)
+        if config.persistence.enabled and config.persistence.is_configured() and not config.persistence.collection_prefix:
+            raise ValueError(
+                "ENVIRONMENT is required when persistence is enabled. "
+                "Set ENVIRONMENT (e.g. paper or live) so collections are created with a prefix (e.g. paper_, live_)."
+            )
+
         # Validate broker and email credentials
         config.broker.validate_broker_credentials()
         config.email.validate_email_credentials()
