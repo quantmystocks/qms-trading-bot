@@ -95,6 +95,8 @@ class TradingBot:
                         project_id=self.config.persistence.project_id,
                         credentials_path=self.config.persistence.credentials_path,
                         credentials_json=self.config.persistence.credentials_json,
+                        database_id=self.config.persistence.database_id,
+                        collection_prefix=self.config.persistence.collection_prefix or "",
                     )
                     logger.info("Initialized persistence manager (Firebase Firestore)")
 
@@ -139,8 +141,15 @@ class TradingBot:
             if slack == 0 and not self.persistence_manager:
                 slack = self.config.default_slack
 
+            # Use a per-portfolio broker if a custom account ID is configured
+            if portfolio_config.broker_account_id:
+                portfolio_broker = create_broker(account_id_override=portfolio_config.broker_account_id)
+                logger.info(f"Created dedicated broker for {portfolio_config.portfolio_name} (account: {portfolio_config.broker_account_id})")
+            else:
+                portfolio_broker = self.broker
+
             rebalancer = Rebalancer(
-                broker=self.broker,
+                broker=portfolio_broker,
                 leaderboard_client=self.leaderboard_client,
                 initial_capital=portfolio_config.initial_capital,
                 portfolio_name=portfolio_config.portfolio_name,
