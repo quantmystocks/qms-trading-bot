@@ -193,9 +193,10 @@ class AlpacaBroker(Broker):
                     'timestamp': timestamp,
                     'trade_id': str(order.id),
                 }
-                if order.client_order_id:
-                    trade_entry['client_order_id'] = order.client_order_id
-                    parts = order.client_order_id.rsplit("-", 1)
+                client_order_id = getattr(order, 'client_order_id', None)
+                if client_order_id:
+                    trade_entry['client_order_id'] = client_order_id
+                    parts = client_order_id.rsplit("-", 1)
                     if len(parts) == 2:
                         trade_entry['tag'] = parts[0]
                 trades.append(trade_entry)

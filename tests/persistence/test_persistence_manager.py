@@ -120,6 +120,7 @@ def persistence_manager(mock_firestore):
                     pm = PersistenceManager.__new__(PersistenceManager)
                     pm.db = mock_firestore
                     pm.project_id = 'test-project'
+                    pm._collection_prefix = ''
                     return pm
 
 
