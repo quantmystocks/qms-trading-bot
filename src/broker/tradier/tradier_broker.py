@@ -1,8 +1,9 @@
 """Tradier broker implementation using the Tradier REST API."""
 
+import json
 import logging
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import requests
 
@@ -29,14 +30,43 @@ class TradierBroker(Broker):
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path}"
 
+    def _parse_json_response(self, resp: requests.Response, context: str) -> Any:
+        """Parse response as JSON; on failure log status/body and re-raise."""
+        if not resp.text or not resp.text.strip():
+            logger.error(
+                "%s: empty response body (status=%s, url=%s)",
+                context,
+                resp.status_code,
+                resp.url,
+            )
+            raise ValueError(
+                f"{context}: Tradier returned empty body (status={resp.status_code}). "
+                "Check API base URL and account ID."
+            )
+        try:
+            return resp.json()
+        except json.JSONDecodeError as e:
+            snippet = (resp.text[:500] + "...") if len(resp.text) > 500 else resp.text
+            logger.error(
+                "%s: invalid JSON (status=%s, content_type=%s). Body snippet: %s",
+                context,
+                resp.status_code,
+                resp.headers.get("Content-Type", ""),
+                snippet,
+            )
+            raise ValueError(
+                f"{context}: Tradier returned non-JSON (status={resp.status_code}). "
+                f"Body starts with: {snippet[:200]!r}"
+            ) from e
+
     def get_current_allocation(self) -> List[Allocation]:
         """Get current portfolio allocation from Tradier."""
         try:
             resp = self.session.get(
-                self._url(f"/v1/accounts/{self.account_id}/positions")
+                self._url(f"/accounts/{self.account_id}/positions")
             )
             resp.raise_for_status()
-            data = resp.json()
+            data = self._parse_json_response(resp, "positions")
 
             positions_data = data.get("positions", {})
             if positions_data == "null" or not positions_data:
@@ -86,11 +116,11 @@ class TradierBroker(Broker):
             if tag:
                 payload["tag"] = tag
             resp = self.session.post(
-                self._url(f"/v1/accounts/{self.account_id}/orders"),
+                self._url(f"/accounts/{self.account_id}/orders"),
                 data=payload,
             )
             resp.raise_for_status()
-            result = resp.json()
+            result = self._parse_json_response(resp, "sell order")
 
             order_info = result.get("order", {})
             order_id = order_info.get("id")
@@ -130,11 +160,11 @@ class TradierBroker(Broker):
             if tag:
                 payload["tag"] = tag
             resp = self.session.post(
-                self._url(f"/v1/accounts/{self.account_id}/orders"),
+                self._url(f"/accounts/{self.account_id}/orders"),
                 data=payload,
             )
             resp.raise_for_status()
-            result = resp.json()
+            result = self._parse_json_response(resp, "buy order")
 
             order_info = result.get("order", {})
             order_id = order_info.get("id")
@@ -154,10 +184,10 @@ class TradierBroker(Broker):
         """Get available cash in the Tradier account."""
         try:
             resp = self.session.get(
-                self._url(f"/v1/accounts/{self.account_id}/balances")
+                self._url(f"/accounts/{self.account_id}/balances")
             )
             resp.raise_for_status()
-            data = resp.json()
+            data = self._parse_json_response(resp, "balances")
 
             balances = data.get("balances", {})
             cash = balances.get("total_cash", balances.get("cash", {}).get("cash_available", 0))
@@ -170,11 +200,11 @@ class TradierBroker(Broker):
         """Get trade history from Tradier."""
         try:
             resp = self.session.get(
-                self._url(f"/v1/accounts/{self.account_id}/orders"),
+                self._url(f"/accounts/{self.account_id}/orders"),
                 params={"limit": 500, "includeTags": "true"},
             )
             resp.raise_for_status()
-            data = resp.json()
+            data = self._parse_json_response(resp, "orders")
 
             orders_data = data.get("orders", {})
             if orders_data == "null" or not orders_data:
@@ -244,11 +274,11 @@ class TradierBroker(Broker):
         """Fetch the last trade price for a symbol."""
         try:
             resp = self.session.get(
-                self._url("/v1/markets/quotes"),
+                self._url("/markets/quotes"),
                 params={"symbols": symbol, "greeks": "false"},
             )
             resp.raise_for_status()
-            data = resp.json()
+            data = self._parse_json_response(resp, "quotes")
 
             quotes = data.get("quotes", {})
             quote = quotes.get("quote", {})
