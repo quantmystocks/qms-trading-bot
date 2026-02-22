@@ -11,6 +11,7 @@ Usage:
     python scripts/setup.py --github --list
     python scripts/setup.py --github --disable live
     python scripts/setup.py --github --enable live
+    python scripts/setup.py --github --sync-workflow   # List env names for manual workflow run (no list in repo)
 
     # Update only specific sections (loads existing .env, runs chosen sections, writes back)
     python scripts/setup.py --update broker
@@ -25,6 +26,7 @@ import argparse
 import getpass
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -1072,6 +1074,7 @@ def prompt_github_environments(repo):
     # Dedupe and create any new environments
     seen = set()
     unique = []
+    created_any = False
     for name in env_names:
         if name in seen:
             continue
@@ -1081,6 +1084,7 @@ def prompt_github_environments(repo):
             print(f"  Creating environment '{name}'...")
             run_cmd(f"gh api repos/{repo}/environments/{name} -X PUT --silent")
             print_success(f"Environment '{name}' created.")
+            created_any = True
 
     return unique
 
@@ -1157,6 +1161,30 @@ def github_enable_environment(env_name):
     print(f"  '{env_name}' will now run on schedule.")
 
 
+def github_sync_workflow_dropdown():
+    """List environment names from GitHub (for manual workflow run). No list is stored in the repo."""
+    if not check_cli("gh"):
+        print_error("GitHub CLI (gh) is not installed.")
+        return
+    repo = get_gh_repo()
+    if not repo:
+        print_error("Could not detect GitHub repository.")
+        return
+    result = run_cmd(f'gh api "repos/{repo}/environments?per_page=100" --jq ".environments[].name"')
+    if not result or result.returncode != 0:
+        print_error("Could not list GitHub Environments (check 'gh auth' and repo access).")
+        return
+    raw = (result.stdout or "").strip()
+    env_names = [n.strip() for n in raw.split("\n") if n.strip()]
+    env_names.sort(key=lambda x: (0 if x == "paper" else 1 if x == "live" else 2, x.lower()))
+    if not env_names:
+        print_error("No environments found. Create them in Settings → Environments.")
+        return
+    print_header("Environment names (for manual workflow run)")
+    print(f"  {', '.join(env_names)}")
+    print("\n  Use one of these when you run the workflow manually (Actions → Run workflow → environment).")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1188,6 +1216,7 @@ examples:
   python scripts/setup.py --github --list        List environments
   python scripts/setup.py --github --disable live
   python scripts/setup.py --github --enable live
+  python scripts/setup.py --github --sync-workflow   List env names for manual run
         """,
     )
     parser.add_argument("--env", action="store_true", help="Generate .env file")
@@ -1197,6 +1226,7 @@ examples:
     parser.add_argument("--list", action="store_true", help="List GitHub environments")
     parser.add_argument("--disable", metavar="ENV", help="Disable a GitHub environment from scheduled runs")
     parser.add_argument("--enable", metavar="ENV", help="Enable a GitHub environment for scheduled runs")
+    parser.add_argument("--sync-workflow", action="store_true", help="List environment names from GitHub (for typing when you manually run the workflow; no list stored in repo)")
     return parser.parse_args()
 
 
@@ -1211,6 +1241,8 @@ def main():
         return github_disable_environment(args.disable)
     if args.enable:
         return github_enable_environment(args.enable)
+    if args.sync_workflow:
+        return github_sync_workflow_dropdown()
 
     # Update-only mode: load .env, run selected sections, write back
     if args.update is not None:

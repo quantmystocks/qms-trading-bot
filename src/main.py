@@ -9,6 +9,7 @@ from datetime import datetime
 import pytz
 
 from .config import get_config
+from .config.config import get_active_environment_summary
 from .config.config import INDEX_NAME_TO_ID
 from .broker import create_broker
 from .broker.models import TradeSummary, PortfolioPerformance, MultiPortfolioSummary
@@ -383,6 +384,9 @@ class TradingBot:
             logger.info("DRY-RUN MODE: Showing what would be executed (no trades will be placed)")
             if is_manual:
                 logger.info("Manual trigger detected - Set FORCE_RUN=true to actually execute trades")
+            logger.info("Active environment (populated env vars):")
+            for line in get_active_environment_summary():
+                logger.info(line)
             logger.info("=" * 60)
         else:
             if is_manual:

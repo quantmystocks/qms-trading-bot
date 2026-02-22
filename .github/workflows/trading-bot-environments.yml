@@ -21,8 +21,9 @@ on:
     - cron: '0 15 * * 1'
   workflow_dispatch:
     inputs:
+      # Environment name (no list in repo). Run locally: python scripts/setup.py --github --list
       environment:
-        description: 'Environment to run (e.g. paper, live)'
+        description: 'Environment name (e.g. paper, live)'
         required: true
         type: string
         default: 'paper'

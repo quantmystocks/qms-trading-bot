@@ -428,6 +428,51 @@ class Config(BaseModel):
         return portfolios
 
 
+# Environment variable names to show on dry-run "active environment" screen.
+# Sensitive vars are shown as (set) / (not set); others show the value.
+_ACTIVE_ENV_VARS = [
+    ("ENVIRONMENT", True),
+    ("FORCE_RUN", False),
+    ("GITHUB_ACTIONS", False),
+    ("GITHUB_EVENT_NAME", False),
+    ("BROKER_TYPE", False),
+    ("TRADE_INDICES", False),
+    ("PORTFOLIO_CONFIG", False),
+    ("LEADERBOARD_API_URL", False),
+    ("LEADERBOARD_API_TOKEN", True),
+    ("ALPACA_BASE_URL", False),
+    ("ALPACA_API_KEY", True),
+    ("ALPACA_API_SECRET", True),
+    ("TRADIER_BASE_URL", False),
+    ("TRADIER_ACCESS_TOKEN", True),
+    ("TRADIER_ACCOUNT_ID", False),
+    ("EMAIL_ENABLED", False),
+    ("EMAIL_RECIPIENT", False),
+    ("EMAIL_PROVIDER", False),
+    ("PERSISTENCE_ENABLED", False),
+    ("FIREBASE_PROJECT_ID", False),
+    ("SCHEDULER_MODE", False),
+    ("CRON_SCHEDULE", False),
+    ("WEBHOOK_PORT", False),
+]
+
+
+def get_active_environment_summary() -> List[str]:
+    """Return a list of 'VAR=value' or 'VAR=(set)|(not set)' for dry-run display."""
+    lines = []
+    for name, sensitive in _ACTIVE_ENV_VARS:
+        value = os.getenv(name)
+        if sensitive:
+            display = "(set)" if (value and value.strip()) else "(not set)"
+        else:
+            if value is None or (isinstance(value, str) and not value.strip()):
+                display = "(not set)"
+            else:
+                display = value.strip() if len(value.strip()) <= 60 else value.strip()[:57] + "..."
+        lines.append(f"  {name}={display}")
+    return lines
+
+
 # Global config instance
 _config: Optional[Config] = None
 
