@@ -1145,6 +1145,21 @@ class PersistenceManager:
         now_et = datetime.now(eastern)
         return now_et.strftime('%Y-%m-%d')
 
+    def get_reconciliation_done_today(self) -> bool:
+        """Return True if reconciliation has already been run today (ET date)."""
+        ref = self._coll('metadata').document('reconciliation')
+        doc = ref.get()
+        if not doc.exists:
+            return False
+        data = doc.to_dict() or {}
+        today_et = self._get_today_date_et()
+        return data.get('last_run_date') == today_et
+
+    def set_reconciliation_done_today(self) -> None:
+        """Mark that reconciliation was run today (ET date)."""
+        ref = self._coll('metadata').document('reconciliation')
+        ref.set({'last_run_date': self._get_today_date_et(), 'updated_at': datetime.now()})
+
     def start_execution_run(self, portfolio_name: str) -> str:
         """
         Start a new execution run for a portfolio.

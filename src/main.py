@@ -284,6 +284,42 @@ class TradingBot:
         force_run = os.getenv("FORCE_RUN", "false").lower() == "true"
         return force_run
     
+    def _run_reconciliation_only(self) -> None:
+        """
+        Reconcile previous trade records only (no new trades).
+        Updates submitted trade status with broker and reconciles broker history with Firestore.
+        Used when outside the trading window or before first execution attempt today.
+        """
+        logger.info("Running reconciliation only (no trades will be placed)")
+        if self.trade_status_checker:
+            for portfolio_name in self.rebalancers.keys():
+                check_result = self.trade_status_checker.check_submitted_trades(portfolio_name)
+                if check_result.checked > 0:
+                    logger.info(
+                        f"[{portfolio_name}] Checked {check_result.checked} submitted trades: "
+                        f"{check_result.filled} filled, {check_result.failed} failed, "
+                        f"{check_result.still_pending} still pending"
+                    )
+                    if self.execution_tracker:
+                        run = self.execution_tracker.get_today_run(portfolio_name)
+                        if run:
+                            self.execution_tracker.update_trade_counts(
+                                run['run_id'],
+                                trades_filled=run.get('trades_filled', 0) + check_result.filled,
+                                trades_failed=run.get('trades_failed', 0) + check_result.failed,
+                                trades_submitted=check_result.still_pending,
+                            )
+        try:
+            broker_trades = self.broker.get_trade_history(since_days=7)
+            if broker_trades and self.persistence_manager:
+                result = self.persistence_manager.reconcile_with_broker_history(broker_trades)
+                logger.info(
+                    f"Broker history reconciliation: {result['updated']} updated, "
+                    f"{result['missing']} missing, {result['unfilled']} unfilled"
+                )
+        except Exception as e:
+            logger.warning(f"Error during broker history reconciliation: {e}")
+
     def _execute_rebalancing(self):
         """Execute rebalancing (wrapper for scheduler/webhook)."""
         # Detect if this is a manual trigger or scheduled run
@@ -295,8 +331,15 @@ class TradingBot:
         # This handles DST automatically since we check the actual ET time
         # FORCE_RUN=true allows execution at any time
         if not self._is_market_open_time():
-            logger.info("Not executing rebalancing - not within trading window (9:30-10:00 AM ET)")
+            logger.info("Not within trading window (9:30-10:00 AM ET) - running reconciliation only")
+            self._run_reconciliation_only()
             return None
+
+        # Before placing any trades: reconcile previous trade records if not already done today
+        if self.persistence_manager and not self.persistence_manager.get_reconciliation_done_today():
+            logger.info("First run in window today - reconciling previous trade records before executing")
+            self._run_reconciliation_only()
+            self.persistence_manager.set_reconciliation_done_today()
 
         # STEP 1: Check status of submitted trades from previous runs
         if self.trade_status_checker:

@@ -2,11 +2,23 @@ name: Trading Bot (Environments)
 
 on:
   schedule:
-    # Run every Monday at 9:30 AM Eastern Time (market open)
-    # 9:30 AM EDT = 13:30 UTC (March-November)
-    # 9:30 AM EST = 14:30 UTC (November-March)
+    # Run multiple times on Monday so one run executes at 9:30 AM ET, rest reconcile or exit (already done)
+    # 9:30 AM EDT = 13:30 UTC (March-November); 9:30 AM EST = 14:30 UTC (November-March)
+    # Every 5 min in both possible windows: only the run at 9:30 AM ET executes trades; others reconcile or "already completed today"
     - cron: '30 13 * * 1'
+    - cron: '35 13 * * 1'
+    - cron: '40 13 * * 1'
+    - cron: '45 13 * * 1'
+    - cron: '50 13 * * 1'
+    - cron: '55 13 * * 1'
+    - cron: '0 14 * * 1'
     - cron: '30 14 * * 1'
+    - cron: '35 14 * * 1'
+    - cron: '40 14 * * 1'
+    - cron: '45 14 * * 1'
+    - cron: '50 14 * * 1'
+    - cron: '55 14 * * 1'
+    - cron: '0 15 * * 1'
   workflow_dispatch:
     inputs:
       environment:
@@ -113,13 +125,18 @@ jobs:
           PERSISTENCE_ENABLED: ${{ vars.PERSISTENCE_ENABLED }}
           FIRESTORE_DATABASE_ID: ${{ vars.FIRESTORE_DATABASE_ID }}
           PERSISTENCE_COLLECTION_PREFIX: ${{ vars.PERSISTENCE_COLLECTION_PREFIX }}
-        run: |
-          python -c "
-          from src.main import TradingBot
-          bot = TradingBot()
-          bot.initialize()
-          bot._execute_rebalancing()
-          "
+        uses: nick-fields/retry@v2
+        with:
+          timeout_minutes: 8
+          max_attempts: 3
+          retry_wait_seconds: 60
+          command: |
+            python -c "
+            from src.main import TradingBot
+            bot = TradingBot()
+            bot.initialize()
+            bot._execute_rebalancing()
+            "
 
       - name: Upload logs (if job fails)
         if: failure()
@@ -196,13 +213,18 @@ jobs:
           PERSISTENCE_ENABLED: ${{ vars.PERSISTENCE_ENABLED }}
           FIRESTORE_DATABASE_ID: ${{ vars.FIRESTORE_DATABASE_ID }}
           PERSISTENCE_COLLECTION_PREFIX: ${{ vars.PERSISTENCE_COLLECTION_PREFIX }}
-        run: |
-          python -c "
-          from src.main import TradingBot
-          bot = TradingBot()
-          bot.initialize()
-          bot._execute_rebalancing()
-          "
+        uses: nick-fields/retry@v2
+        with:
+          timeout_minutes: 8
+          max_attempts: 3
+          retry_wait_seconds: 60
+          command: |
+            python -c "
+            from src.main import TradingBot
+            bot = TradingBot()
+            bot.initialize()
+            bot._execute_rebalancing()
+            "
 
       - name: Upload logs (if job fails)
         if: failure()
