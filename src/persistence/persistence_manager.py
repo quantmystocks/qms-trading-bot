@@ -1063,7 +1063,7 @@ class PersistenceManager:
             portfolio_name: Portfolio name
             initial_capital: Initial capital amount
         """
-        cash_ref = self.db.collection('portfolio_cash').document(portfolio_name)
+        cash_ref = self._coll('portfolio_cash').document(portfolio_name)
         cash_doc = cash_ref.get()
 
         if not cash_doc.exists:
@@ -1090,7 +1090,7 @@ class PersistenceManager:
         Returns:
             Current cash balance, or 0.0 if not initialized
         """
-        cash_ref = self.db.collection('portfolio_cash').document(portfolio_name)
+        cash_ref = self._coll('portfolio_cash').document(portfolio_name)
         cash_doc = cash_ref.get()
 
         if cash_doc.exists:
@@ -1110,7 +1110,7 @@ class PersistenceManager:
         Returns:
             New cash balance
         """
-        cash_ref = self.db.collection('portfolio_cash').document(portfolio_name)
+        cash_ref = self._coll('portfolio_cash').document(portfolio_name)
         cash_doc = cash_ref.get()
 
         if not cash_doc.exists:
@@ -1173,7 +1173,7 @@ class PersistenceManager:
         date_str = self._get_today_date_et()
         run_id = f"{portfolio_name}_{date_str}"
 
-        run_ref = self.db.collection('execution_runs').document(run_id)
+        run_ref = self._coll('execution_runs').document(run_id)
         run_doc = run_ref.get()
 
         now = datetime.now()
@@ -1215,7 +1215,7 @@ class PersistenceManager:
             date_str = self._get_today_date_et()
 
         run_id = f"{portfolio_name}_{date_str}"
-        run_ref = self.db.collection('execution_runs').document(run_id)
+        run_ref = self._coll('execution_runs').document(run_id)
         run_doc = run_ref.get()
 
         if run_doc.exists:
@@ -1257,7 +1257,7 @@ class PersistenceManager:
             **kwargs: Fields to update (status, trades_planned, trades_submitted,
                       trades_filled, trades_failed, completed_at, error_message)
         """
-        run_ref = self.db.collection('execution_runs').document(execution_run_id)
+        run_ref = self._coll('execution_runs').document(execution_run_id)
         run_doc = run_ref.get()
 
         if not run_doc.exists:
@@ -1293,7 +1293,7 @@ class PersistenceManager:
         trade.status = 'planned'
         trade.execution_run_id = execution_run_id
 
-        collection = self.db.collection('trades')
+        collection = self._coll('trades')
         doc_ref = collection.document()
         doc_ref.set(trade.to_dict())
 
@@ -1308,7 +1308,7 @@ class PersistenceManager:
             trade_doc_id: Firestore document ID
             broker_order_id: Broker's order ID (optional)
         """
-        trade_ref = self.db.collection('trades').document(trade_doc_id)
+        trade_ref = self._coll('trades').document(trade_doc_id)
         update_data = {
             'status': 'submitted',
             'submitted_at': datetime.now(),
@@ -1335,7 +1335,7 @@ class PersistenceManager:
             price: Fill price
             total: Total value
         """
-        trade_ref = self.db.collection('trades').document(trade_doc_id)
+        trade_ref = self._coll('trades').document(trade_doc_id)
         trade_ref.update({
             'status': 'filled',
             'filled_at': datetime.now(),
@@ -1353,7 +1353,7 @@ class PersistenceManager:
             trade_doc_id: Firestore document ID
             error_message: Error description
         """
-        trade_ref = self.db.collection('trades').document(trade_doc_id)
+        trade_ref = self._coll('trades').document(trade_doc_id)
         trade_ref.update({
             'status': 'failed',
             'failed_at': datetime.now(),
@@ -1371,7 +1371,7 @@ class PersistenceManager:
         Returns:
             List of trade dicts with doc_id included
         """
-        trades_ref = self.db.collection('trades')
+        trades_ref = self._coll('trades')
 
         if FieldFilter:
             query = trades_ref.where(
@@ -1404,7 +1404,7 @@ class PersistenceManager:
         Returns:
             List of trade dicts with doc_id included
         """
-        trades_ref = self.db.collection('trades')
+        trades_ref = self._coll('trades')
 
         # Get planned trades
         if FieldFilter:
