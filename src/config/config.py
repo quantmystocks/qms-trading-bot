@@ -265,7 +265,7 @@ class Config(BaseModel):
         persistence_credentials_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
         # Single database name (e.g. "(default)" or "live")
         persistence_database = (os.getenv("FIRESTORE_DATABASE") or "(default)").strip()
-        # Collection prefix always from env name (e.g. ENVIRONMENT=paper -> paper_)
+        # Collection prefix from env name when set (e.g. ENVIRONMENT=paper -> paper_). No prefix when ENVIRONMENT is unset.
         env_name = (os.getenv("ENVIRONMENT") or "").strip().lower()
         persistence_collection_prefix = f"{env_name}_" if env_name else ""
 
@@ -326,13 +326,6 @@ class Config(BaseModel):
                 "Multiple portfolios require persistence to be enabled. "
                 "Please set PERSISTENCE_ENABLED=true and configure Firebase credentials, "
                 "or use a single portfolio (TRADE_INDICES=SP400)."
-            )
-
-        # Persistence requires ENVIRONMENT so collections use env prefix (e.g. paper_, live_)
-        if config.persistence.enabled and config.persistence.is_configured() and not config.persistence.collection_prefix:
-            raise ValueError(
-                "ENVIRONMENT is required when persistence is enabled. "
-                "Set ENVIRONMENT (e.g. paper or live) so collections are created with a prefix (e.g. paper_, live_)."
             )
 
         # Validate broker and email credentials
