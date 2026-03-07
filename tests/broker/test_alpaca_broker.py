@@ -28,6 +28,7 @@ class MockOrder:
         filled_at=None,
         submitted_at=None,
         limit_price=None,
+        client_order_id=None,
     ):
         self.id = order_id
         self.symbol = symbol
@@ -40,6 +41,7 @@ class MockOrder:
         self.submitted_at = submitted_at or datetime.now()
         self.limit_price = limit_price
         self.submitted_price = limit_price
+        self.client_order_id = client_order_id
 
 
 class MockAccount:

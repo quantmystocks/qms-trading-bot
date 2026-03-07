@@ -9,6 +9,7 @@ from datetime import datetime
 import pytz
 
 from .config import get_config
+from .config.config import get_active_environment_summary
 from .config.config import INDEX_NAME_TO_ID
 from .broker import create_broker
 from .broker.models import TradeSummary, PortfolioPerformance, MultiPortfolioSummary
@@ -95,6 +96,8 @@ class TradingBot:
                         project_id=self.config.persistence.project_id,
                         credentials_path=self.config.persistence.credentials_path,
                         credentials_json=self.config.persistence.credentials_json,
+                        database=self.config.persistence.database,
+                        collection_prefix=self.config.persistence.collection_prefix,
                     )
                     logger.info("Initialized persistence manager (Firebase Firestore)")
 
@@ -139,8 +142,15 @@ class TradingBot:
             if slack == 0 and not self.persistence_manager:
                 slack = self.config.default_slack
 
+            # Use a per-portfolio broker if a custom account ID is configured
+            if portfolio_config.broker_account_id:
+                portfolio_broker = create_broker(account_id_override=portfolio_config.broker_account_id)
+                logger.info(f"Created dedicated broker for {portfolio_config.portfolio_name} (account: {portfolio_config.broker_account_id})")
+            else:
+                portfolio_broker = self.broker
+
             rebalancer = Rebalancer(
-                broker=self.broker,
+                broker=portfolio_broker,
                 leaderboard_client=self.leaderboard_client,
                 initial_capital=portfolio_config.initial_capital,
                 portfolio_name=portfolio_config.portfolio_name,
@@ -153,7 +163,7 @@ class TradingBot:
             self.rebalancers[portfolio_config.portfolio_name] = rebalancer
             logger.info(f"Initialized rebalancer for {portfolio_config.portfolio_name} portfolio (index {portfolio_config.index_id}, stockcount={stockcount}, slack={slack})")
 
-            # Initialize cash balance for this portfolio
+            # Initialize cash balance for this portfolio (required when persistence is enabled)
             if self.cash_manager:
                 self.cash_manager.initialize(
                     portfolio_config.portfolio_name,
@@ -275,6 +285,42 @@ class TradingBot:
         force_run = os.getenv("FORCE_RUN", "false").lower() == "true"
         return force_run
     
+    def _run_reconciliation_only(self) -> None:
+        """
+        Reconcile previous trade records only (no new trades).
+        Updates submitted trade status with broker and reconciles broker history with Firestore.
+        Used when outside the trading window or before first execution attempt today.
+        """
+        logger.info("Running reconciliation only (no trades will be placed)")
+        if self.trade_status_checker:
+            for portfolio_name in self.rebalancers.keys():
+                check_result = self.trade_status_checker.check_submitted_trades(portfolio_name)
+                if check_result.checked > 0:
+                    logger.info(
+                        f"[{portfolio_name}] Checked {check_result.checked} submitted trades: "
+                        f"{check_result.filled} filled, {check_result.failed} failed, "
+                        f"{check_result.still_pending} still pending"
+                    )
+                    if self.execution_tracker:
+                        run = self.execution_tracker.get_today_run(portfolio_name)
+                        if run:
+                            self.execution_tracker.update_trade_counts(
+                                run['run_id'],
+                                trades_filled=run.get('trades_filled', 0) + check_result.filled,
+                                trades_failed=run.get('trades_failed', 0) + check_result.failed,
+                                trades_submitted=check_result.still_pending,
+                            )
+        try:
+            broker_trades = self.broker.get_trade_history(since_days=7)
+            if broker_trades and self.persistence_manager:
+                result = self.persistence_manager.reconcile_with_broker_history(broker_trades)
+                logger.info(
+                    f"Broker history reconciliation: {result['updated']} updated, "
+                    f"{result['missing']} missing, {result['unfilled']} unfilled"
+                )
+        except Exception as e:
+            logger.warning(f"Error during broker history reconciliation: {e}")
+
     def _execute_rebalancing(self):
         """Execute rebalancing (wrapper for scheduler/webhook)."""
         # Detect if this is a manual trigger or scheduled run
@@ -286,8 +332,15 @@ class TradingBot:
         # This handles DST automatically since we check the actual ET time
         # FORCE_RUN=true allows execution at any time
         if not self._is_market_open_time():
-            logger.info("Not executing rebalancing - not within trading window (9:30-10:00 AM ET)")
+            logger.info("Not within trading window (9:30-10:00 AM ET) - running reconciliation only")
+            self._run_reconciliation_only()
             return None
+
+        # Before placing any trades: reconcile previous trade records if not already done today
+        if self.persistence_manager and not self.persistence_manager.get_reconciliation_done_today():
+            logger.info("First run in window today - reconciling previous trade records before executing")
+            self._run_reconciliation_only()
+            self.persistence_manager.set_reconciliation_done_today()
 
         # STEP 1: Check status of submitted trades from previous runs
         if self.trade_status_checker:
@@ -331,6 +384,9 @@ class TradingBot:
             logger.info("DRY-RUN MODE: Showing what would be executed (no trades will be placed)")
             if is_manual:
                 logger.info("Manual trigger detected - Set FORCE_RUN=true to actually execute trades")
+            logger.info("Active environment (populated env vars):")
+            for line in get_active_environment_summary():
+                logger.info(line)
             logger.info("=" * 60)
         else:
             if is_manual:

@@ -21,7 +21,7 @@ INDEX_NAME_TO_ID = {
 class BrokerConfig(BaseModel):
     """Broker configuration."""
 
-    broker_type: str = Field(default="alpaca", description="Broker type: 'alpaca', 'robinhood', or 'webull'")
+    broker_type: str = Field(default="alpaca", description="Broker type: 'alpaca', 'robinhood', 'webull', or 'tradier'")
     
     # Alpaca credentials
     alpaca_api_key: Optional[str] = None
@@ -38,13 +38,18 @@ class BrokerConfig(BaseModel):
     webull_app_secret: Optional[str] = None
     webull_account_id: Optional[str] = Field(default=None, description="Webull account ID (optional, will use first account if not provided)")
     webull_region: str = Field(default="US", description="Webull region: US, HK, or JP")
+    
+    # Tradier credentials
+    tradier_access_token: Optional[str] = None
+    tradier_account_id: Optional[str] = None
+    tradier_base_url: str = Field(default="https://sandbox.tradier.com/v1", description="Tradier base URL (sandbox or production)")
 
     @field_validator("broker_type")
     @classmethod
     def validate_broker_type(cls, v: str) -> str:
         """Validate broker type."""
         v_lower = v.lower()
-        valid_types = ["alpaca", "robinhood", "webull"]
+        valid_types = ["alpaca", "robinhood", "webull", "tradier"]
         if v_lower not in valid_types:
             raise ValueError(f"Invalid broker type: {v}. Must be one of: {', '.join(valid_types)}")
         return v_lower
@@ -60,6 +65,9 @@ class BrokerConfig(BaseModel):
         elif self.broker_type == "webull":
             if not self.webull_app_key or not self.webull_app_secret:
                 raise ValueError("Webull App Key and App Secret are required when BROKER_TYPE=webull. Get them from developer.webull.com")
+        elif self.broker_type == "tradier":
+            if not self.tradier_access_token or not self.tradier_account_id:
+                raise ValueError("Tradier access token and account ID are required when BROKER_TYPE=tradier")
 
 
 class EmailConfig(BaseModel):
@@ -118,7 +126,8 @@ class SchedulerConfig(BaseModel):
     """Scheduler configuration."""
 
     mode: str = Field(default="internal", description="Scheduler mode: 'internal' or 'external'")
-    cron_schedule: str = Field(default="0 0 * * 1", description="Cron expression for internal scheduler (Mondays at midnight)")
+    cron_schedule: str = Field(default="30 9 * * 1", description="Cron expression for internal scheduler (default: Monday 9:30 AM)")
+    cron_timezone: Optional[str] = Field(default=None, description="Timezone for cron (e.g. America/New_York); if set, cron is interpreted in this zone so DST is handled automatically; if absent, uses server local time")
     webhook_port: int = Field(default=8080, description="Port for webhook endpoint")
     webhook_secret: Optional[str] = Field(default=None, description="Optional secret token for webhook authentication")
 
@@ -139,6 +148,10 @@ class PersistenceConfig(BaseModel):
     project_id: Optional[str] = Field(default=None, description="Firebase project ID")
     credentials_path: Optional[str] = Field(default=None, description="Path to Firebase service account JSON file")
     credentials_json: Optional[str] = Field(default=None, description="Firebase service account JSON as string (alternative to credentials_path)")
+    # Single Firestore database name (e.g. "(default)" or "live"). Required when persistence enabled.
+    database: str = Field(default="(default)", description="Firestore database name (use '(default)' for default DB)")
+    # Collection prefix derived from ENVIRONMENT (e.g. paper -> paper_, live -> live_). Always applied.
+    collection_prefix: str = Field(default="", description="Prefix for all collection names (e.g. paper_, live_)")
 
     def is_configured(self) -> bool:
         """Check if Firebase credentials are configured."""
@@ -154,6 +167,7 @@ class PortfolioConfig(BaseModel):
     enabled: bool = Field(default=True, description="Whether this portfolio is enabled")
     stockcount: int = Field(default=5, description="Number of stocks to hold in portfolio")
     slack: int = Field(default=0, description="Position buffer - sell when rank > stockcount + slack")
+    broker_account_id: Optional[str] = Field(default=None, description="Optional broker account ID override for this portfolio (e.g. Tradier sub-account)")
 
 
 class Config(BaseModel):
@@ -203,6 +217,9 @@ class Config(BaseModel):
             webull_app_secret=os.getenv("WEBULL_APP_SECRET"),
             webull_account_id=os.getenv("WEBULL_ACCOUNT_ID"),
             webull_region=os.getenv("WEBULL_REGION", "US"),
+            tradier_access_token=os.getenv("TRADIER_ACCESS_TOKEN"),
+            tradier_account_id=os.getenv("TRADIER_ACCOUNT_ID"),
+            tradier_base_url=os.getenv("TRADIER_BASE_URL", "https://sandbox.tradier.com/v1"),
         )
         
         # Handle SMTP_PORT with proper default for empty strings
@@ -230,9 +247,12 @@ class Config(BaseModel):
         webhook_port_str = os.getenv("WEBHOOK_PORT", "8080")
         webhook_port = int(webhook_port_str) if webhook_port_str and webhook_port_str.strip() else 8080
         
+        scheduler_cron = os.getenv("CRON_SCHEDULE", "30 9 * * 1")
+        scheduler_timezone = os.getenv("SCHEDULER_TIMEZONE") or None
         scheduler_config = SchedulerConfig(
             mode=os.getenv("SCHEDULER_MODE", "internal"),
-            cron_schedule=os.getenv("CRON_SCHEDULE", "0 0 * * 1"),
+            cron_schedule=scheduler_cron,
+            cron_timezone=scheduler_timezone,
             webhook_port=webhook_port,
             webhook_secret=os.getenv("WEBHOOK_SECRET"),
         )
@@ -243,16 +263,23 @@ class Config(BaseModel):
         persistence_project_id = os.getenv("FIREBASE_PROJECT_ID")
         persistence_credentials_path = os.getenv("FIREBASE_CREDENTIALS_PATH")
         persistence_credentials_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
-        
+        # Single database name (e.g. "(default)" or "live")
+        persistence_database = (os.getenv("FIRESTORE_DATABASE") or "(default)").strip()
+        # Collection prefix from env name when set (e.g. ENVIRONMENT=paper -> paper_). No prefix when ENVIRONMENT is unset.
+        env_name = (os.getenv("ENVIRONMENT") or "").strip().lower()
+        persistence_collection_prefix = f"{env_name}_" if env_name else ""
+
         # Auto-enable if credentials are configured (even if PERSISTENCE_ENABLED is not explicitly true)
         if persistence_project_id and (persistence_credentials_path or persistence_credentials_json):
             persistence_enabled = True
-        
+
         persistence_config = PersistenceConfig(
             enabled=persistence_enabled,
             project_id=persistence_project_id,
             credentials_path=persistence_credentials_path,
             credentials_json=persistence_credentials_json,
+            database=persistence_database,
+            collection_prefix=persistence_collection_prefix,
         )
         
         # Handle INITIAL_CAPITAL with proper default for empty strings
@@ -300,7 +327,7 @@ class Config(BaseModel):
                 "Please set PERSISTENCE_ENABLED=true and configure Firebase credentials, "
                 "or use a single portfolio (TRADE_INDICES=SP400)."
             )
-        
+
         # Validate broker and email credentials
         config.broker.validate_broker_credentials()
         config.email.validate_email_credentials()
@@ -329,13 +356,15 @@ class Config(BaseModel):
                         if portfolio_name and index_id:
                             if portfolio_name not in INDEX_NAME_TO_ID:
                                 raise ValueError(f"Invalid portfolio name: {portfolio_name}. Must be one of: {', '.join(INDEX_NAME_TO_ID.keys())}")
+                            broker_account_id = portfolio_data.get("broker_account_id")
                             portfolios.append(PortfolioConfig(
                                 portfolio_name=portfolio_name,
                                 index_id=index_id,
                                 initial_capital=float(initial_capital),
                                 enabled=enabled,
                                 stockcount=int(stockcount),
-                                slack=int(slack)
+                                slack=int(slack),
+                                broker_account_id=broker_account_id,
                             ))
             except json.JSONDecodeError as e:
                 raise ValueError(f"Invalid PORTFOLIO_CONFIG JSON: {e}")
@@ -373,16 +402,68 @@ class Config(BaseModel):
                 slack_str = os.getenv(slack_env_var)
                 slack = int(slack_str) if slack_str and slack_str.strip() else 0
 
+                # Get optional per-portfolio broker account ID
+                account_id_env_var = f"BROKER_ACCOUNT_ID_{index_name}"
+                broker_account_id = os.getenv(account_id_env_var)
+                if broker_account_id and not broker_account_id.strip():
+                    broker_account_id = None
+
                 portfolios.append(PortfolioConfig(
                     portfolio_name=index_name,
                     index_id=index_id,
                     initial_capital=initial_capital,
                     enabled=True,
                     stockcount=stockcount,
-                    slack=slack
+                    slack=slack,
+                    broker_account_id=broker_account_id,
                 ))
         
         return portfolios
+
+
+# Environment variable names to show on dry-run "active environment" screen.
+# Sensitive vars are shown as (set) / (not set); others show the value.
+_ACTIVE_ENV_VARS = [
+    ("ENVIRONMENT", True),
+    ("FORCE_RUN", False),
+    ("GITHUB_ACTIONS", False),
+    ("GITHUB_EVENT_NAME", False),
+    ("BROKER_TYPE", False),
+    ("TRADE_INDICES", False),
+    ("PORTFOLIO_CONFIG", False),
+    ("LEADERBOARD_API_URL", False),
+    ("LEADERBOARD_API_TOKEN", True),
+    ("ALPACA_BASE_URL", False),
+    ("ALPACA_API_KEY", True),
+    ("ALPACA_API_SECRET", True),
+    ("TRADIER_BASE_URL", False),
+    ("TRADIER_ACCESS_TOKEN", True),
+    ("TRADIER_ACCOUNT_ID", False),
+    ("EMAIL_ENABLED", False),
+    ("EMAIL_RECIPIENT", False),
+    ("EMAIL_PROVIDER", False),
+    ("PERSISTENCE_ENABLED", False),
+    ("FIREBASE_PROJECT_ID", False),
+    ("SCHEDULER_MODE", False),
+    ("CRON_SCHEDULE", False),
+    ("WEBHOOK_PORT", False),
+]
+
+
+def get_active_environment_summary() -> List[str]:
+    """Return a list of 'VAR=value' or 'VAR=(set)|(not set)' for dry-run display."""
+    lines = []
+    for name, sensitive in _ACTIVE_ENV_VARS:
+        value = os.getenv(name)
+        if sensitive:
+            display = "(set)" if (value and value.strip()) else "(not set)"
+        else:
+            if value is None or (isinstance(value, str) and not value.strip()):
+                display = "(not set)"
+            else:
+                display = value.strip() if len(value.strip()) <= 60 else value.strip()[:57] + "..."
+        lines.append(f"  {name}={display}")
+    return lines
 
 
 # Global config instance
